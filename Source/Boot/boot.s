@@ -17,7 +17,7 @@ start:
     mov ax, word 0
     mov bx, ax
 
-    mov al, byte 60 ; total number of sectors
+    mov al, byte 63 ; total number of sectors
     mov ch, byte 0 ; cylinder number
     mov cl, byte 2 ; starting sector (after MBR)
     mov dh, byte 0 ; head number

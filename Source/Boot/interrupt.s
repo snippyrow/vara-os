@@ -6,13 +6,15 @@
 [global IDT_Add]
 [global Kbd_Int_Handle]
 [global PIT_Config]
+[global Kbd_Hooks]
+[global Kbd_Test]
 
 [extern V_FRAME_ADDR]
 [extern V_UPDATE]
 [extern V_DrawRect]
-
-Kbd_Hooks:
-    resd 32 ; 32 possible function pointers
+[extern V_DrawChar]
+[extern malloc]
+[extern free]
 
 IDT_Remap:
     ; Re-map the master & slave PIC. How does it work? 
@@ -125,13 +127,69 @@ PIT_Int_Handle:
     popa
     iret
 
+Kbd_Hooks:
+    times 32 dd 0 ; 32 possible function pointers
+
+; CL  = loop counter (up to 32)
+; EDI = function vector
 Kbd_Int_Handle:
     pusha
     in al, 0x60
+    mov cl, byte 0 ; Loop counter for iteration
+    mov edi, Kbd_Hooks
+.iterate:
+    cmp cl, byte 32
+    je .end
+    mov ebx, dword [edi]
+    test ebx, ebx
+    jz .skip
+    pusha
+    ; scancode is already in AL, and is restored after the function
+    call ebx
+    popa
+.skip:
+    inc cl
+    add edi, 4
+    jmp .iterate
+.end:
     mov al, 0x20
     out 0x20, al
     popa
     iret
 
-; Hook the keyboard to a function
-Kbd_Hook:
+
+NCD: resd 1
+
+Kbd_Test:
+    mov eax, 0x13
+    mov ebx, 0x00500020
+    mov cl, 'A'
+    mov ch, 0xf
+    int 0x80
+    
+    mov eax, 64
+    call malloc
+    mov dword [NCD], eax
+
+    cmp eax, 0
+    jne .true
+.false:
+    mov cl, 'F'
+    jmp .end
+.true:
+    mov cl, 'T'
+
+    mov eax, dword [NCD]
+    mov ebx, 64
+    call free
+
+.end:
+    mov eax, 0x13
+    mov ebx, 0x00900020
+    mov ch, 0xf
+    int 0x80
+
+    mov eax, 0x10
+    int 0x80
+
+    ret

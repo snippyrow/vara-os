@@ -7,11 +7,19 @@
 [extern Kbd_Int_Handle]
 [extern PIT_Config]
 [extern ata_lba_read]
+[extern Kernel_Start]
 
 [global V_FRAME_ADDR]
 [global Test_Proc]
 [global V_UPDATE]
 [global V_DrawRect]
+[global V_WORK_BUFF]
+[global V_DrawString]
+[global V_TEST_B]
+[global V_FNT_BUFF]
+[global V_DrawChar]
+[global VBE_Info]
+
 
 ; Linked kernel starts here.
 
@@ -78,79 +86,6 @@ PMode_Start:
 
 
     jmp 0x08:Kernel_Start
-
-
-
-Kernel_Start:
-    ; IDT Has been defined, populate it with components
-
-    ; Map PIT to the handler
-    ; PIT will be used for task scheduling
-    ; First grab ptr to the IDT entry and populate the stuff
-
-    push dword PIT_Int_Handle
-    push dword 32
-    call IDT_Add
-    add esp, 8
-
-    push dword Kbd_Int_Handle
-    push dword 33
-    call IDT_Add
-    add esp, 8
-    
-    call IDT_Remap
-
-    lidt [IDT_Desc]
-
-    ; Change PIT frequency to 20hz
-    mov eax, 20
-    call PIT_Config
-
-    ;mov al, 0b11111010 ; Unmask cascade and KBD
-    mov al, 0b11111000
-    out 0x21, al
-
-    sti
-
-    ; Draw a rect
-    mov [V_WORK_BUFF + 15], byte 0xf
-    mov eax, dword 0x00100010
-    mov ebx, dword 0x01200300
-    mov cl, byte 0xc
-    call V_DrawRect
-    call V_UPDATE
-
-
-    mov eax, dword 0 ; location of buffer
-    mov edi, V_TEST_B          ; Starting LBA
-    mov cl, 1           ; # of sectors to read
-    call ata_lba_read
-
-
-    mov esi, test_str
-    mov eax, 0x00400020
-    mov bh, byte 0xf
-    call V_DrawString
-
-
-
-    ; Test print the array
-    mov ecx, 0
-    mov eax, V_TEST_B
-.loop:
-    cmp ecx, 0xff
-    je .end
-    mov bl, byte [eax]
-    mov [V_WORK_BUFF + ecx + 1280], bl
-    inc eax
-    inc ecx
-    jmp .loop
-.end:
-    call V_UPDATE
-    jmp $
-
-test_str:
-    db "Hello, world!",0
 
 
 ; Video functions
@@ -222,7 +157,10 @@ V_DrawRect:
 V_DrawChar:
     ; EDI contains offset within the font buffer
     pusha
+    xor esi, esi
+    xor ebp, ebp
     movzx esi, ax ; X
+    and eax, dword 0xFFFF0000
     shr eax, byte 16
     movzx ebp, ax ; Y
 
@@ -233,8 +171,10 @@ V_DrawChar:
     movzx edi, bl
     imul edi, dword 16
 
+
     mov eax, ebp
-    mov ebx, [V_WIDTH]
+    xor ebx, ebx
+    movzx ebx, word [V_WIDTH] ; must be a constant for some reason, otherwise bugs out Y coordinates
     mul ebx
     add eax, esi
 
