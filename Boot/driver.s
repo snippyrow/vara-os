@@ -1,6 +1,7 @@
 [bits 32]
 [global ata_lba_read]
 [global malloc]
+[global free]
 
 ; EAX = LBA starting address
 ; CL  = # of sectors to read
@@ -62,7 +63,7 @@ ata_lba_read:
 ; Return EAX contains the pointer to the start (0 if failed)
 
 block_size equ 128              ; Example block size (adjust as needed)
-num_blocks equ 64               ; Total number of blocks (adjust as needed)
+num_blocks equ 2               ; Total number of blocks (adjust as needed)
 mem_table:
     ;db 0b11111100
     resb num_blocks
@@ -158,6 +159,48 @@ malloc:
     xor eax, eax
     ret
 
-
+; EAX = starting ptr, EBX = # of blocks to free
 free:
+    ; Calculate required space
+    pusha
+    xor edx, edx
+
+    mov ecx, eax
+    mov eax, ebx
+    dec eax
+    mov ebx, dword block_size
+    div ebx
+    inc eax
+    mov edi, eax ; Required # of blocks
+
+    ; ECX has starting ptr
+    sub ecx, dword base_address
+    xor edx, edx
+    mov ebx, dword block_size
+    mov eax, ecx
+    div ebx
+    mov ebp, eax ; Starting block #
+
+    ; Define EBX as the loop index
+    xor ebx, ebx
+    
+.loop:
+    mov eax, ebp
+    add eax, ebx
+    mov ecx, eax
+    shr eax, 3 ; / 8
+    and ecx, 7 ; % 8
+
+    mov dh, 1
+    shr dh, cl
+    not dh
+
+    and byte [mem_table + eax], dh
+
+    inc ebx
+    cmp ebx, edi
+    jl .loop
+
+.end:
+    popa
     ret

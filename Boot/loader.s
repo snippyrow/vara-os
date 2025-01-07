@@ -16,6 +16,14 @@
 [extern V_DrawChar]
 [extern VBE_Info]
 [extern V_FNT_BUFF]
+[extern malloc]
+[extern free]
+[extern Kbd_Hooks]
+[extern Kbd_Test]
+[extern process_create]
+[extern process_yield]
+[extern process_destroy]
+[extern PIT_Hooks]
 
 Kernel_Start:
     ; IDT Has been defined, populate it with components
@@ -45,7 +53,7 @@ Kernel_Start:
     lidt [IDT_Desc]
 
     ; Change PIT frequency to 20hz
-    mov eax, 20
+    mov eax, 30
     call PIT_Config
 
 
@@ -63,34 +71,37 @@ Kernel_Start:
     call V_DrawRect
     call V_UPDATE
 
-
-    mov eax, dword 0 ; location of buffer
-    mov edi, V_TEST_B          ; Starting LBA
-    mov cl, 1           ; # of sectors to read
-    call ata_lba_read
-
-
     mov esi, test_str
     mov eax, 0x00400020
     mov bh, byte 0xf
     call V_DrawString
 
+    mov eax, 0x10
+    int 0x80
 
+    ; Add the basic process
+    mov eax, 0x30
+    mov ebx, process_test
+    int 0x80
 
-    ; Test print the array
-    mov ecx, 0
-    mov eax, V_TEST_B
-.loop:
-    cmp ecx, 0xff
-    je .end
-    mov bl, byte [eax]
-    mov [V_WORK_BUFF + ecx + 1280], bl
-    inc eax
-    inc ecx
-    jmp .loop
-.end:
-    call V_UPDATE
+    ; Now do a small test and jump to a loaded program
+    mov eax, dword 50 ; Starting LBA
+    mov edi, 0x500000 ; Program laoded location
+    mov cl, 5 ; # of sectors to read
+    ;call ata_lba_read
+
+    mov eax, 0x30
+    mov ebx, 0x50000
+    int 0x80
+    ; Jump to basic looping process
+    jmp process_test
+
     jmp $
+
+process_test:
+    mov eax, 0x31
+    int 0x80
+    jmp process_test
 
 test_str:
     db "Hello, world!",0
@@ -103,9 +114,18 @@ test_str:
 ; LIST:
 ;   EAX 0x10 = Update screen from work buffer
 ;   EAX 0x12 = Draw rectangle (ebx = [x0, y0], ecx = [x1, y1], dl = color)
-;   EAX 0x13 = Draw default 8x16 character (ebx = [x,y], cl = char, ch = color)
+;   EAX 0x13 = Draw default 8x16 character (ebx = [y,x], cl = char, ch = color)
 ;   EAX 0x16 = Get display information (return eax = VESA information vector, return ebx = work buffer start vector, return vector ecx = default font buffer)
 ;   EAX 0x18 = ATA LBA read to vector (ebx = LBA start address, cl = # of sectors to read, edi = buffer start address)
+;   EAX 0x1A = Kernel MALLOC (ebx = # of bytes required, return eax = start ptr (0 if failed))
+;   EAX 0x1B = Kernel FREE (ebx = start ptr (from malloc), ecx = size in bytes to free)
+;   EAX 0x20 = Hook Keyboard (ebx = function ptr)
+;   EAX 0x21 = Unhook Keyboard (ebx = function ptr)
+;   EAX 0x24 = Hook PIT (ebx = function ptr)
+;   EAX 0x25 = Unhook PIT (ebx = function ptr)
+;   EAX 0x30 = Spawn Process (ebx = starting addr, return eax = PID (0 if failed))
+;   EAX 0x31 = Yield Process to kernel
+;   EAX 0x32 = Process Kill (ebx = PID)
 Sys_Int_Handle:
     cmp eax, dword 0x10
     je .v_render
@@ -117,6 +137,25 @@ Sys_Int_Handle:
     je .v_ret_info
     cmp eax, dword 0x18
     je .ata_read
+    cmp eax, dword 0x1A
+    je .i_malloc
+    cmp eax, dword 0x1B
+    je .i_free
+    cmp eax, dword 0x20
+    je .kbd_hook
+    cmp eax, dword 0x21
+    je .kbd_unhook
+    cmp eax, dword 0x30
+    je .proc_create
+    cmp eax, dword 0x31
+    je .proc_yield
+    cmp eax, dword 0x32
+    je .proc_kill
+
+    cmp eax, dword 0x24
+    je .pit_hook
+    cmp eax, dword 0x25
+    je .pit_unhook
     iret
 .v_render:
     pusha
@@ -148,5 +187,128 @@ Sys_Int_Handle:
     pusha
     mov eax, ebx
     call ata_lba_read
+    popa
+    iret
+.m_ret:
+    resd 1
+.i_malloc:
+    pusha
+    mov eax, ebx
+    call ata_lba_read
+    mov dword [.m_ret], eax
+    popa
+    mov eax, dword [.m_ret]
+    iret
+.i_free:
+    pusha
+    mov eax, ebx
+    mov ebx, ecx
+    call malloc
+    popa
+    iret
+.proc_create:
+    pusha
+    mov eax, ebx
+    call process_create
+    mov dword [.m_ret], eax
+    popa
+    mov eax, dword [.m_ret]
+    iret
+.proc_yield:
+    pusha
+    call process_yield
+    popa
+    iret
+.proc_kill:
+    pusha
+    mov eax, ebx
+    call process_destroy
+    popa
+    iret
+
+; Loop through the hook table maximum 32 times, set the function located in ebx.
+; Function ptr located in EBX
+.kbd_hook:
+    pusha
+    mov cl, byte 0 ; Loop counter for iteration
+    mov edi, Kbd_Hooks
+.iterate:
+    cmp cl, byte 32
+    je .end
+    mov edx, dword [edi]
+    test edx, edx
+    jnz .skip
+    ; Found a function ptr that is 0, update
+    mov dword [edi], ebx
+    jmp .end
+.skip:
+    inc cl
+    add edi, 4
+    jmp .iterate
+.end:
+    popa
+    iret
+
+; Set a ptr in the hook table to 0 based off of function ptr in EBX
+.kbd_unhook:
+    pusha
+    mov cl, byte 0 ; Loop counter for iteration
+    mov edi, Kbd_Hooks
+.iterate_u:
+    cmp cl, byte 32
+    je .end_u
+    mov edx, dword [edi]
+    cmp edx, ebx
+    jne .skip_u
+    ; Skip if not equal to the function ptr, otherwise set it
+    mov dword [edi], dword 0x0
+    jmp .end_u
+.skip_u:
+    inc cl
+    add edi, 4
+    jmp .iterate_u
+.end_u:
+    popa
+    iret
+
+.pit_hook:
+    pusha
+    mov cl, byte 0 ; Loop counter for iteration
+    mov edi, PIT_Hooks
+.iterate_v1:
+    cmp cl, byte 32
+    je .end_v1
+    mov edx, dword [edi]
+    test edx, edx
+    jnz .skip_v1
+    ; Found a function ptr that is 0, update
+    mov dword [edi], ebx
+    jmp .end_v1
+.skip_v1:
+    inc cl
+    add edi, 4
+    jmp .iterate_v1
+.end_v1:
+    popa
+    iret
+
+.pit_unhook:
+    pusha
+    mov cl, byte 0 ; Loop counter for iteration
+    mov edi, PIT_Hooks
+.iterate_u1:
+    cmp cl, byte 32
+    je .end_u1
+    mov edx, dword [edi]
+    cmp edx, ebx
+    jne .skip_u1
+    ; Skip if not equal to the function ptr, otherwise set it
+    mov dword [edi], dword 0x0
+    jmp .end_u1
+.skip_u1:
+    inc cl
+    add edi, 4
+    jmp .iterate_u1
+.end_u1:
     popa
     iret

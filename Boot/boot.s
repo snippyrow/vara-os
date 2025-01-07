@@ -27,6 +27,23 @@ start:
     int 0x13
 
     jc .error
+
+    ; Buffer
+    mov ax, 0x5000
+    mov es, ax
+    mov ax, word 0
+    mov bx, ax
+
+    mov al, byte 5 ; total number of sectors
+    mov ch, byte 0 ; cylinder number
+    mov cl, byte 51 ; starting sector (after MBR)
+    mov dh, byte 0 ; head number
+
+    mov dl, byte 0x80 ; primary drive
+    mov ah, byte 2 ; Read drive opcode
+    int 0x13
+
+    jc .error
     
     ; Jump to the defined kernel, out of the pure binary
     jmp KERNEL_START
