@@ -8,6 +8,7 @@
 [global PIT_Config]
 [global Kbd_Hooks]
 [global Kbd_Test]
+[global PIT_Hooks]
 
 [extern V_FRAME_ADDR]
 [extern V_UPDATE]
@@ -91,41 +92,61 @@ IDT_Add:
     resb 4
 
 ; Frequency stays in eax
-
 PIT_Config:
     mov ebx, eax
     mov eax, dword 1193182
     xor edx, edx
     div ebx
-    mov ebx, eax
+    mov bx, ax
 
     ; Send a command byte to update PIT
     mov al, 0x36
     out 0x43, al
 
-    mov bx, ax
-    and ax, word 0xFF
+    mov al, bl
     out 0x40, al
-
-    mov bx, ax
-    shr ax, byte 8
-    and ax, word 0xFF
+    
+    mov al, bh
     out 0x40, al
 
     ret
 
 NC: db 0
 
+PIT_Hooks:
+    dd Test_PIT
+    times 32 dd 0 ; 32 possible func ptrs
+
 PIT_Int_Handle:
     pusha
-    inc byte [NC]
-    mov bl, byte [NC]
-    mov eax, [V_FRAME_ADDR]
-    mov [eax], bl
+    xor eax, eax
+    mov cl, byte 0 ; Loop counter for iteration
+    mov edi, PIT_Hooks
+.iterate:
+    cmp cl, byte 32
+    je .end
+    mov ebx, dword [edi]
+    test ebx, ebx
+    jz .skip
+    pusha
+    call ebx
+    popa
+.skip:
+    inc cl
+    add edi, 4
+    jmp .iterate
+.end:
     mov al, 0x20
     out 0x20, al
     popa
     iret
+
+Test_PIT:
+    inc byte [NC]
+    mov bl, byte [NC]
+    mov eax, [V_FRAME_ADDR]
+    mov [eax], bl
+    ret
 
 Kbd_Hooks:
     times 32 dd 0 ; 32 possible function pointers
@@ -134,6 +155,7 @@ Kbd_Hooks:
 ; EDI = function vector
 Kbd_Int_Handle:
     pusha
+    xor eax, eax
     in al, 0x60
     mov cl, byte 0 ; Loop counter for iteration
     mov edi, Kbd_Hooks

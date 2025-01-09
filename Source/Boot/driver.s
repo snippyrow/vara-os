@@ -8,6 +8,7 @@
 ; EDI = Destination buffer starting address
 
 ata_lba_read:
+    jmp 0
     pusha
 
     and eax, 0x0FFFFFFF ; limit # of LBA

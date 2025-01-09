@@ -13,13 +13,13 @@ asm:
 	nasm "Source/Boot/proc.s" -f elf -o "Binaries/proc.o"
 
 # compile shell program on boot
-	nasm "Source/Prog/shell.s" -f elf -o "Binaries/shell_p.o"
+	nasm -felf32 "Source/Prog/Shell/shell.s" -f bin -o "Binaries/shell.bin"
 # nasm "Source/Asm/proc.s" -f elf -o "Binaries/proc.o"
 # /usr/local/i386elfgcc/bin/i386-elf-gcc $(CFLAGS) -c Source/Utilities/Util.cpp -o Binaries/util.o
 
 link:
 	/usr/local/i386elfgcc/bin/i386-elf-ld -o "Binaries/k_loader.bin" -Ttext 0x7e00 "Binaries/interface.o" "Binaries/interrupt.o" "Binaries/driver.o" "Binaries/loader.o" "Binaries/proc.o" --oformat binary
-	/usr/local/i386elfgcc/bin/i386-elf-ld -o "Binaries/shell.bin" -Ttext 0x40000 "Binaries/shell_p.o" --oformat binary
+# /usr/local/i386elfgcc/bin/i386-elf-ld -o "Binaries/shell.bin" -Ttext 0x400000 "Binaries/shell_p.o" --oformat binary
 
 run:
 	dd if=Binaries/boot.bin of=main.img bs=512
@@ -38,9 +38,13 @@ run:
     -d int \
     -no-reboot
 
+	qemu-img convert -f raw -O raw main.img vbox.img
+
 # sudo dd if=main.img of=/dev/sda bs=4M status=progress && sync
 # -enable-kvm
 # cloc . --exclude-dir=.venv,OLD
+# qemu-img convert -f raw -O raw main.img output.img (prepare image for vbox)
+
 
 # TODO:
 #	Write syscalls for filesystem

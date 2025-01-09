@@ -13,6 +13,7 @@
 [global process_create]
 [global process_yield]
 [global process_destroy]
+[extern malloc]
 
 MAX_PROC equ 32
 
@@ -121,7 +122,6 @@ process_yield:
     mov dword [edi + 20], eax
 
     mov eax, esp ; ESP
-    add eax, 12 + 32 + 4 ; from before function, pusha and int
     mov dword [edi + 16], eax
 
     mov eax, [esp + 20] ; EBX
@@ -151,11 +151,22 @@ process_yield:
     ; Otherwise, jump here
     mov [edi + 6], byte 0x2 ; set to old all the time
     mov ebx, dword [edi + 2]
-    mov dword [esp + 36], ebx ; update EIP return on syscall
+    ; EBX now contains the desired return addr
+    ;mov dword [esp + 36], ebx ; update EIP return on syscall
     inc ax ; increment for PID working
     mov word [current_pid], ax
     mov word [proc_index], ax
-    jmp .end
+
+    ; Move stack and load save state
+    dec ax
+    mov edi, process_states
+    shl ax, byte 5 ; x 32
+    add edi, eax
+    ;mov esp, dword [edi + 16]
+    mov dword [esp + 36], ebx ; update EIP return on syscall
+    ; In future, update stack so that it is not continuous
+    ret
+
 .skip:
     inc ax
     add edi, 8
