@@ -24,6 +24,10 @@
 [extern process_yield]
 [extern process_destroy]
 [extern PIT_Hooks]
+[extern ata_lba_write]
+[extern FAT_Format]
+[extern fat_next]
+[extern fat_update]
 
 Kernel_Start:
     ; IDT Has been defined, populate it with components
@@ -86,13 +90,29 @@ Kernel_Start:
 
     ; Now do a small test and jump to a loaded program
     mov eax, 50 ; Starting LBA
-    mov edi, 0x60000 ; Program laoded location
+    mov edi, 0x50000 ; Program laoded location
     mov cl, 7 ; # of sectors to read
-    ;call ata_lba_read
+    call ata_lba_read
 
     mov eax, 0x30
     mov ebx, 0x50000
     int 0x80
+
+    call FAT_Format
+    test eax, eax
+    jz crash
+
+    mov eax, 10
+    call fat_next
+
+    mov eax, 1
+    mov ebx, 0x69696969
+    call fat_update
+
+    mov eax, 129
+    mov ebx, 0x01020304
+    call fat_update
+
     ; Jump to basic looping process
     jmp process_test
 
@@ -104,7 +124,10 @@ process_test:
     jmp process_test
 
 test_str:
-    db "Hello, world!",0
+    db "Hello, world! How are you? This is just a little test phrase to figure out what is going wrong with any ATA disk reading and writing fucntions. Thanks for stopping by!",0
+
+crash:
+    jmp 0
 
 
 ; Primary syscall handler
@@ -117,6 +140,7 @@ test_str:
 ;   EAX 0x13 = Draw default 8x16 character (ebx = [y,x], cl = char, ch = color)
 ;   EAX 0x16 = Get display information (return eax = VESA information vector, return ebx = work buffer start vector, return vector ecx = default font buffer)
 ;   EAX 0x18 = ATA LBA read to vector (ebx = LBA start address, cl = # of sectors to read, edi = buffer start address)
+;   EAX 0x19 = ATA write from ptr to LBA (ebx = LBA start address, cl = # of sectors to write, edi = buffer start address)
 ;   EAX 0x1A = Kernel MALLOC (ebx = # of bytes required, return eax = start ptr (0 if failed))
 ;   EAX 0x1B = Kernel FREE (ebx = start ptr (from malloc), ecx = size in bytes to free)
 ;   EAX 0x20 = Hook Keyboard (ebx = function ptr)
@@ -126,6 +150,13 @@ test_str:
 ;   EAX 0x30 = Spawn Process (ebx = starting addr, return eax = PID (0 if failed))
 ;   EAX 0x31 = Yield Process to kernel
 ;   EAX 0x32 = Process Kill (ebx = PID)
+
+;   EAX 0x40 = Make FAT object (ebx = fat object ptr, ecx = directory entry cluster) (fat object defined in file.s)
+;   EAX 0x41 = Search FAT directory (ebx = directory entry fluster, ecx = ptr to name (case sensetive), dl = object attributes).. search for a FAT object based on name and attributes
+;       Return EAX = ptr towards the FAT object copied from the directory, 0 if none found
+;   EAX 0x42 = Read file or directory (ebx = object cluster start, ecx = output buffer ptr) (recommend reading file size first)
+;   EAX 0x43 = Touch file (ebx = file starting cluster, esi = data input buffer, ecx = data size)
+;   EAX 0x44 = Format FAT to empty clusters (deletes everything!)
 Sys_Int_Handle:
     cmp eax, dword 0x10
     je .v_render
@@ -137,6 +168,8 @@ Sys_Int_Handle:
     je .v_ret_info
     cmp eax, dword 0x18
     je .ata_read
+    cmp eax, dword 0x19
+    je .ata_write
     cmp eax, dword 0x1A
     je .i_malloc
     cmp eax, dword 0x1B
@@ -187,6 +220,12 @@ Sys_Int_Handle:
     pusha
     mov eax, ebx
     call ata_lba_read
+    popa
+    iret
+.ata_write:
+    pusha
+    mov eax, ebx
+    call ata_lba_write
     popa
     iret
 .m_ret:

@@ -69,6 +69,8 @@ main:
     ; Write intro spash
     mov eax, intro
     call tty_printstr
+    mov eax, shell_prompt
+    call tty_printstr
 
     ; Render changes
     mov eax, 0x10
@@ -216,7 +218,12 @@ shell_enter:
     add eax, ecx
     mov ebx, dword [eax]
     pop ecx
-    jmp ebx ; returning ends the shell enter
+    call ebx ; call loaded function, returns here
+    mov al, 10
+    call tty_putchar
+    mov eax, shell_prompt
+    call tty_printstr
+    ret
 .end:
     pop ecx
     jmp none_default
@@ -368,6 +375,11 @@ tty_clear:
 str: db 10,"Command not found.",10,0
 none_default:
     mov eax, str
+    call tty_printstr
+    
+    mov al, 10
+    call tty_putchar
+    mov eax, shell_prompt
     call tty_printstr
     ; Render changes
     mov eax, 0x10

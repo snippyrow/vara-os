@@ -9,6 +9,12 @@
 KERNEL_START equ 0x7e00
 
 start:
+    ; Set ES/DX to 0 during real mode
+    cli
+    xor ax, ax
+    mov ds, ax
+    mov es, ax
+
     ; Load the kernel
 
     ; Buffer
@@ -28,23 +34,23 @@ start:
 
     jc .error
 
-    ; Buffer
     mov ax, 0x5000
     mov es, ax
     mov ax, word 0
     mov bx, ax
 
-    mov al, byte 5 ; total number of sectors
+    mov al, byte 8 ; total number of sectors
     mov ch, byte 0 ; cylinder number
     mov cl, byte 51 ; starting sector (after MBR)
     mov dh, byte 0 ; head number
 
     mov dl, byte 0x80 ; primary drive
     mov ah, byte 2 ; Read drive opcode
-    int 0x13
+    ;int 0x13
+    
 
     jc .error
-    
+
     ; Jump to the defined kernel, out of the pure binary
     jmp KERNEL_START
 
@@ -52,10 +58,12 @@ start:
     mov ah, byte 0x0E ; Print BIOS code
     mov si, err_print
 .e_loop:
-    lodsb
-    cmp al, 0
-    je .e_done
-    int 0x10
+    mov al, byte [si]
+    test al, al
+    jz .e_done
+    inc si
+    int 0x10           ; Print the character
+.skip_char:
     jmp .e_loop
 .e_done:
     jmp $

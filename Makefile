@@ -11,6 +11,7 @@ asm:
 	nasm "Source/Boot/interrupt.s" -f elf -o "Binaries/interrupt.o"
 	nasm "Source/Boot/driver.s" -f elf -o "Binaries/driver.o"
 	nasm "Source/Boot/proc.s" -f elf -o "Binaries/proc.o"
+	nasm "Source/Boot/file.s" -f elf -o "Binaries/file.o"
 
 # compile shell program on boot
 	nasm -felf32 "Source/Prog/Shell/shell.s" -f bin -o "Binaries/shell.bin"
@@ -18,7 +19,7 @@ asm:
 # /usr/local/i386elfgcc/bin/i386-elf-gcc $(CFLAGS) -c Source/Utilities/Util.cpp -o Binaries/util.o
 
 link:
-	/usr/local/i386elfgcc/bin/i386-elf-ld -o "Binaries/k_loader.bin" -Ttext 0x7e00 "Binaries/interface.o" "Binaries/interrupt.o" "Binaries/driver.o" "Binaries/loader.o" "Binaries/proc.o" --oformat binary
+	/usr/local/i386elfgcc/bin/i386-elf-ld -o "Binaries/k_loader.bin" -Ttext 0x7e00 "Binaries/interface.o" "Binaries/interrupt.o" "Binaries/driver.o" "Binaries/loader.o" "Binaries/proc.o" "Binaries/file.o" --oformat binary
 # /usr/local/i386elfgcc/bin/i386-elf-ld -o "Binaries/shell.bin" -Ttext 0x400000 "Binaries/shell_p.o" --oformat binary
 
 run:
@@ -26,7 +27,8 @@ run:
 	dd if=Binaries/k_loader.bin of=main.img bs=512 seek=1
 	dd if=Assets/font.bin of=main.img bs=512 seek=40
 	dd if=Binaries/shell.bin of=main.img bs=512 seek=50
-	dd if=/dev/zero bs=1 count=100000 >> main.img
+	dd if=/dev/zero bs=1 count=300000 >> main.img
+# append 7100000 zeroes to convert to vdi
 
 	qemu-system-x86_64 \
 	-enable-kvm \
@@ -39,6 +41,8 @@ run:
     -no-reboot
 
 	qemu-img convert -f raw -O raw main.img vbox.img
+	VBoxManage convertfromraw vbox.img vara.vdi --format VDI
+
 
 # sudo dd if=main.img of=/dev/sda bs=4M status=progress && sync
 # -enable-kvm

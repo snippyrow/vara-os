@@ -1,5 +1,6 @@
 [bits 32]
 [global ata_lba_read]
+[global ata_lba_write]
 [global malloc]
 [global free]
 
@@ -7,8 +8,8 @@
 ; CL  = # of sectors to read
 ; EDI = Destination buffer starting address
 
+; Read a single sector at a time (to start with)
 ata_lba_read:
-    jmp 0
     pusha
 
     and eax, 0x0FFFFFFF ; limit # of LBA
@@ -45,18 +46,103 @@ ata_lba_read:
     in al, dx
     test al, 8
     jz .reading
-
-    mov eax, 256 ; Read 256 words (512 bytes) (one sector)
-    xor bx, bx
-    mov bl, cl ; read "CL" sectors
-    mul bx ; # of sectors * 256 words per sector
-    mov ecx, eax ; ecx is the counter for INSW
+    push ecx
+    push edx
+    mov ecx, 256 ; ecx is the counter for INSW
     ; edx is the I/O port to read from
     ; then store that word into EDI buffer
 
     mov edx, dword 0x01F0 ; Dataport, IN/OUT
     rep insw ; repeat until ecx becomes zero
+    pop edx
+    pop ecx
+    dec cl
+    test cl, cl
+    jz .end
+    ; 400ns delay and repeat
+    jmp .reading
+
+.end
     ; Done!
+    popa
+    ret
+
+
+; EAX = LBA starting address
+; CL  = # of sectors to write to
+; EDI = Source buffer for information
+
+; Write multiple sectors to primary ATA device
+ata_lba_write:
+    pusha
+
+    and eax, 0x0FFFFFFF ; limit # of LBA
+    mov ebx, eax
+    
+    mov dx, word 0x01F6  ; Port to send drive and bit 24 - 27 of LBA
+    shr eax, 24          ; Get bit 24 - 27 in al
+    or al, 0b11100000    ; Set bit 6 in al for LBA mode
+    out dx, al
+
+    mov dx, word 0x01F2  ; Port to send number of sectors
+    mov al, cl           ; Get number of sectors from CL
+    out dx, al
+
+    mov dx, word 0x01F3  ; Port to send bit 0 - 7 of LBA
+    mov eax, ebx         ; Get LBA from EBX
+    out dx, al
+
+    mov dx, word 0x01F4  ; Port to send bit 8 - 15 of LBA
+    mov eax, ebx         ; Get LBA from EBX
+    shr eax, 8           ; Get bit 8 - 15 in AL
+    out dx, al
+
+    mov dx, word 0x01F5  ; Port to send bit 16 - 23 of LBA
+    mov eax, ebx         ; Get LBA from EBX
+    shr eax, 16          ; Get bit 16 - 23 in AL
+    out dx, al
+
+    mov dx, word 0x01F7  ; Command port
+    mov al, byte 0x30    ; Write sectors
+    out dx, al
+
+; Do not use rep, due to it being too fast
+.writing:
+    in al, dx
+    test al, 8
+    jz .writing
+    push ecx
+    push edx
+    ; Init loop
+    mov cx, 256
+    mov dx, word 0x01F0 ; DATA port
+.loop:
+    mov ax, word [edi]
+    out dx, ax
+    add edi, 2
+    dec cx
+    test cx, cx
+    jz .next
+    jmp .loop
+.next:
+    pop edx
+    pop ecx
+    dec cl
+    test cl, cl
+    jz .endw
+    jmp .writing
+
+.endw:
+    ; Done!
+    ; Flush cache
+    mov dx, word 0x01F7 ; command port
+    mov al, byte 0xE7 ; Cache flush command
+    out dx, al
+.flush_wait:
+    in al, dx
+    test al, 0b10000000 ; Check BSY (bit 7)
+    jnz .flush_wait
+
     popa
     ret
 
@@ -64,7 +150,7 @@ ata_lba_read:
 ; Return EAX contains the pointer to the start (0 if failed)
 
 block_size equ 128              ; Example block size (adjust as needed)
-num_blocks equ 2               ; Total number of blocks (adjust as needed)
+num_blocks equ 512              ; Total number of blocks (adjust as needed)
 mem_table:
     ;db 0b11111100
     resb num_blocks
@@ -87,6 +173,7 @@ malloc:
     xor ebp, ebp ; starting block
 
     xor ebx, ebx ; s_block (use for final start)
+
 .loop_sblock:
     cmp ebx, num_blocks
     jge .alloc_failed
@@ -160,7 +247,7 @@ malloc:
     xor eax, eax
     ret
 
-; EAX = starting ptr, EBX = # of blocks to free
+; EAX = starting ptr, EBX = # of bytes to free
 free:
     ; Calculate required space
     pusha
