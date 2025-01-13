@@ -42,9 +42,11 @@
 ; After some fofset, the FAT as well as the filesystem begins.
 ; The first directory created is the root directory, starting at cluster 0. It is spawned on-format.
 
-; ** Note: FAT_LENGTH capped at <32640, due to how many sectors ata_write can do at once
+; ** Note: FAT_LENGTH capped at <32640, due to how many sectors ata_write can do at once in the format stage
+; The maximum number of entries per directory is 1024 due to memory limits
 FAT_OFFSET equ 200 ; 200 sector offset from code
-FAT_LENGTH equ 1024 ; 1024 clusters in the FAT
+FAT_LENGTH equ 1024 ; 1024 clusters indexed in the FAT
+MAX_PER_DIR equ 1024
 Secotrs_Per_Cluster equ 1
 
 EOC equ 0xFFFFFFFF
@@ -57,12 +59,20 @@ NONE equ 0x00FFFFFF
 [extern ata_lba_read]
 [global fat_next]
 [global fat_update]
+[global fat_mko]
 [bits 32]
 
 ; Each sector of the FAT can index 128 further clusters (sectors)
 ; Format the entire FAT to empty clusters, in preperation for new files
 ; Return EAX 0 if error
 FAT_Format:
+    ; Reserve a place for listing directory entries, and for keeping track of the clusters indexed in the FAT
+    mov eax, (MAX_PER_DIR * 32) + (MAX_PER_DIR / 32) * 4 ; First part for listing entires, second for clusters
+    call malloc
+    test eax, eax
+    jz .end
+    mov dword [list_ptr], eax ; move ptr
+
     ; Have the entire FAT loaded into memory to format
     mov eax, dword FAT_LENGTH ; 512 bytes
     shl eax, 2 ; x 4
@@ -113,15 +123,16 @@ fat_next:
     push edx
     push edi
     mov edx, eax
-    cmp eax, dword [loaded]
-    je .send ; if the sector has already been cached
     shr eax, 7 ; / 128
     add eax, dword FAT_OFFSET
+    
+    cmp eax, dword [loaded]
+    je .send ; if the sector has already been cached
     ; EAX now contains starting LBA
     mov cl, 1
     mov edi, page
     call ata_lba_read
-    mov dword [loaded], edx ; save new value
+    mov dword [loaded], eax ; save new value
 .send:
     and edx, dword 0b01111111 ; mod 128
     shl edx, 2 ; x 4 for dword
@@ -137,16 +148,18 @@ fat_update:
     push ecx
     push edx
     push edi
-    cmp eax, dword [loaded]
-    je .change
     ; Cache the new sector
     mov edx, eax
     shr eax, 7 ; / 128
     add eax, dword FAT_OFFSET
+
+    cmp eax, dword [loaded]
+    je .change
+
     mov cl, 1
     mov edi, page
     call ata_lba_read
-    mov dword [loaded], edx ; save new value
+    mov dword [loaded], eax ; save new value
 .change:
     and edx, dword 0b01111111 ; mod 128
     shl edx, 2 ; x 4 for dword
@@ -160,9 +173,144 @@ fat_update:
     pop eax
     ret
 
+; EAX = directory entry cluster, return EAX = ptr
+fat_dir_list:
+    ; loop through, adding to the list of all clusters
+    mov edi, dword [list_ptr]
+
+    ; Convert first cluster to LBA
+    ; EDI is restored after the ATA call
+    push eax
+    add eax, dword FAT_OFFSET
+    add eax, (FAT_LENGTH * 4) / 512 ; go past FAT
+    mov cl, 1
+    call ata_lba_read
+    add edi, 512
+    pop eax
+
+.fat_loop:
+    call fat_next
+    cmp eax, dword EOC
+    je .end_scan
+    ; Convert next cluster to LBA
+    push eax
+    add eax, dword FAT_OFFSET
+    add eax, (FAT_LENGTH * 4) / 512 ; go past FAT
+    call ata_lba_read
+    pop eax
+    add edi, 512
+    jmp .fat_loop
+.end_scan:
+    mov eax, dword [list_ptr]
+    ret
+
+
+; EAX = file cluster start, EBX = output ptr
+fat_o_read:
+    ; loop through, adding to the list of all clusters
+    mov edi, ebx
+
+    ; Convert first cluster to LBA
+    ; EDI is restored after the ATA call
+    push eax
+    add eax, dword FAT_OFFSET
+    add eax, (FAT_LENGTH * 4) / 512 ; go past FAT
+    mov cl, 1
+    call ata_lba_read
+    add edi, 512
+    pop eax
+
+.fat_loop:
+    call fat_next
+    cmp eax, dword EOC
+    je .end_scan
+    ; Convert next cluster to LBA
+    push eax
+    add eax, dword FAT_OFFSET
+    add eax, (FAT_LENGTH * 4) / 512 ; go past FAT
+    call ata_lba_read
+    pop eax
+    add edi, 512
+    jmp .fat_loop
+.end_scan:
+    ret
+
+; EAX = fat object ptr, EBX = directory entry cluster
+fat_mko:
+    ; Firstly, find if there is space in the root cluster. Otherwise, continue, make a new cluster if needed.
+    ; Recursivly search directory structure
+    push eax ; pushed until we need it
+    mov edi, page
+    mov eax, ebx
+    add eax, dword FAT_OFFSET
+    add eax, (FAT_LENGTH * 4) / 512
+    mov cl, 1
+    mov dword [loaded], dword 0xFFFFFFFF ; disable for this command
+    call ata_lba_read
+    
+    xor ebp, ebp ; offset within the page
+    xor ch, ch ; ch is the counter
+.loop_ava:
+    mov al, byte [page + ebp + 11]
+    test al, al
+    jz .avalible
+    ; Otherwise, increment ebp and counter
+    inc ch
+    add ebp, 32
+    cmp ch, 16
+    jb .loop_ava
+.new_load:
+    ; If we are out of spots in this cluster
+    xor ebp, ebp
+    xor ch, ch
+    mov eax, ebx
+    call fat_next
+    cmp eax, dword EOC
+    je .new ; make a new cluster
+    ; Otherwise read into the next one
+    mov ebx, eax ; store the new cluster for the next-next, and for if it is avalible
+    add eax, dword FAT_OFFSET
+    add eax, (FAT_LENGTH * 4) / 512
+    ; cl/edi is set
+    call ata_lba_read
+    jmp .loop_ava
+
+.new:
+    ; TODO: Finish new, make the FAT update, provide clusters for navigators and make a function to search for unused clusters/dealloc
+.avalible:
+    ; EBX has the cluster needed, EBP contains the offset within the page region and EDI has the page itself
+    ; Copy fat to desired spot
+    pop esi ; ptr to struct
+    mov edi, page
+    add edi, ebp ; add page offset
+    mov ecx, 32 ; 32 bytes
+    call memcpy
+    mov eax, ebx
+
+    add eax, dword FAT_OFFSET
+    add eax, (FAT_LENGTH * 4) / 512
+    mov cl, 1
+    call ata_lba_write ; commit changes
+    ret
+
+
+; EDI = destination, ESI = source, ECX = # of bytes
+memcpy:
+    push esi
+    push edi
+    cld
+.loop:
+    movsb ; Copy byte from [esi] to [edi], increments both
+    dec ecx
+    jnz .loop
+    pop edi
+    pop esi
+    ret
+
 ; Fast 512-byte page instead of needing malloc
 page:
     resb 512
-
 loaded:
-    dd 0xFFFFFFFF ; The current cluster sitting in the page (set to a random value so not 0)
+    dd 0xFFFFFFFF ; The currently loaded LBA, to enable caches
+list_ptr:
+    resd 1 ; points to malloc'd ptr for listing entries in a directroy and for counting clusters

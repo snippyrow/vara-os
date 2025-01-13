@@ -150,7 +150,7 @@ ata_lba_write:
 ; Return EAX contains the pointer to the start (0 if failed)
 
 block_size equ 128              ; Example block size (adjust as needed)
-num_blocks equ 512              ; Total number of blocks (adjust as needed)
+num_blocks equ 8192             ; Total number of blocks (adjust as needed)
 mem_table:
     ;db 0b11111100
     resb num_blocks
@@ -176,12 +176,12 @@ malloc:
 
 .loop_sblock:
     cmp ebx, num_blocks
-    jge .alloc_failed
+    jae .alloc_failed
 
     xor ecx, ecx ; b_block (eight times per byte)
 .loop_b:
     cmp ecx, 8 ; if at the end
-    jge .next_sblock
+    jae .next_sblock
 
     ; Now check if the bit is free
     movzx ax, byte [mem_table + ebx]
@@ -201,7 +201,7 @@ malloc:
     inc edx
     inc ecx
     cmp edx, esi ; check if the number we counted is equal to the required # of blocks
-    jl .loop_b ; If we have less than the required go back
+    jb .loop_b ; If we have less than the required go back
     ; Otherwise complete and calculate the offset here
     ; Update all blocks first before returning, OK to change registers now
 
@@ -222,7 +222,7 @@ malloc:
     inc ebx
 
     cmp ebx, esi
-    jl .set_blocks ; if we are not done, compare and redo
+    jb .set_blocks ; if we are not done, compare and redo
 
     ; Then calculate new address
     mov eax, ebp

@@ -28,6 +28,7 @@
 [extern FAT_Format]
 [extern fat_next]
 [extern fat_update]
+[extern fat_mko]
 
 Kernel_Start:
     ; IDT Has been defined, populate it with components
@@ -90,7 +91,7 @@ Kernel_Start:
 
     ; Now do a small test and jump to a loaded program
     mov eax, 50 ; Starting LBA
-    mov edi, 0x50000 ; Program laoded location
+    mov edi, 0x50000 ; Program loaded location
     mov cl, 7 ; # of sectors to read
     call ata_lba_read
 
@@ -107,11 +108,15 @@ Kernel_Start:
 
     mov eax, 1
     mov ebx, 0x69696969
-    call fat_update
+    ;call fat_update
 
     mov eax, 129
     mov ebx, 0x01020304
-    call fat_update
+    ;call fat_update
+
+    mov eax, fat_test_struct
+    mov ebx, 1
+    call fat_mko
 
     ; Jump to basic looping process
     jmp process_test
@@ -128,6 +133,17 @@ test_str:
 
 crash:
     jmp 0
+
+fat_test_struct:
+    db "Testfile"
+    db "txt"
+    db 1
+    dd 0x69 ; cluster, reserved
+    dd 0
+    dd 0
+    dd 512
+    dd 0
+
 
 
 ; Primary syscall handler
@@ -152,9 +168,9 @@ crash:
 ;   EAX 0x32 = Process Kill (ebx = PID)
 
 ;   EAX 0x40 = Make FAT object (ebx = fat object ptr, ecx = directory entry cluster) (fat object defined in file.s)
-;   EAX 0x41 = Search FAT directory (ebx = directory entry fluster, ecx = ptr to name (case sensetive), dl = object attributes).. search for a FAT object based on name and attributes
-;       Return EAX = ptr towards the FAT object copied from the directory, 0 if none found
-;   EAX 0x42 = Read file or directory (ebx = object cluster start, ecx = output buffer ptr) (recommend reading file size first)
+;       The function takes care of different types of entries, such as parents, etc. Struct will be modified to reflect properties
+;   EAX 0x41 = Read directory struct (ebx = directory start, return eax = ptr to list).. reads a directory, loads it to memory and returns a ptr. Raw data
+;   EAX 0x42 = Read file (or directory) (ebx = object cluster start, ecx = output buffer ptr) (recommend reading file size first)
 ;   EAX 0x43 = Touch file (ebx = file starting cluster, esi = data input buffer, ecx = data size)
 ;   EAX 0x44 = Format FAT to empty clusters (deletes everything!)
 Sys_Int_Handle:
