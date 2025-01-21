@@ -29,6 +29,7 @@
 [extern fat_next]
 [extern fat_update]
 [extern fat_mko]
+[extern fat_read]
 
 Kernel_Start:
     ; IDT Has been defined, populate it with components
@@ -101,22 +102,7 @@ Kernel_Start:
 
     call FAT_Format
     test eax, eax
-    jz crash
-
-    mov eax, 10
-    call fat_next
-
-    mov eax, 1
-    mov ebx, 0x69696969
-    ;call fat_update
-
-    mov eax, 129
-    mov ebx, 0x01020304
-    ;call fat_update
-
-    mov eax, fat_test_struct
-    mov ebx, 1
-    call fat_mko
+    jz 0
 
     ; Jump to basic looping process
     jmp process_test
@@ -167,12 +153,11 @@ fat_test_struct:
 ;   EAX 0x31 = Yield Process to kernel
 ;   EAX 0x32 = Process Kill (ebx = PID)
 
-;   EAX 0x40 = Make FAT object (ebx = fat object ptr, ecx = directory entry cluster) (fat object defined in file.s)
+;   EAX 0x40 = Make FAT object (ebx = directory start cluster, edi = fat object ptr)
 ;       The function takes care of different types of entries, such as parents, etc. Struct will be modified to reflect properties
-;   EAX 0x41 = Read directory struct (ebx = directory start, return eax = ptr to list).. reads a directory, loads it to memory and returns a ptr. Raw data
-;   EAX 0x42 = Read file (or directory) (ebx = object cluster start, ecx = output buffer ptr) (recommend reading file size first)
-;   EAX 0x43 = Touch file (ebx = file starting cluster, esi = data input buffer, ecx = data size)
-;   EAX 0x44 = Format FAT to empty clusters (deletes everything!)
+;   EAX 0x41 = Read raw (ebx = raw cluster start, edi = buffer ptr, ecx = max clusters).. reads a directory/file, loads it to buffer
+;   EAX 0x42 = Touch raw (ebx = file starting cluster, esi = data input buffer, ecx = data size)
+;   EAX 0x43 = Format FAT to empty clusters (deletes everything!)
 Sys_Int_Handle:
     cmp eax, dword 0x10
     je .v_render
@@ -205,6 +190,15 @@ Sys_Int_Handle:
     je .pit_hook
     cmp eax, dword 0x25
     je .pit_unhook
+
+    cmp eax, dword 0x40
+    je .fat_mk
+    cmp eax, dword 0x41
+    je .fat_rd
+    cmp eax, dword 0x42
+    ;je .fat_wr
+    cmp eax, dword 0x43
+    ;je .fat_form
     iret
 .v_render:
     pusha
@@ -278,6 +272,19 @@ Sys_Int_Handle:
     pusha
     mov eax, ebx
     call process_destroy
+    popa
+    iret
+.fat_mk:
+    push ebx
+    mov eax, ebx
+    mov ebx, edi
+    call fat_mko
+    pop ebx
+    iret
+.fat_rd:
+    pusha
+    mov eax, ebx
+    call fat_read
     popa
     iret
 

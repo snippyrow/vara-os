@@ -39,7 +39,9 @@
 ; uint32_t UUID
 
 ; The MBR is located on the first sector, and after comes the kernel code.
-; After some fofset, the FAT as well as the filesystem begins.
+; At the very start of the volume, a table called the superblock table exists. This table is loaded into memory at format, and is updated whenever needed.
+; The superblock table is designed to keep track of used clusters in the data region, and the FAT tracks where those clusters actually go. This is designed to improve scan times.
+; After some offset, the FAT as well as the filesystem begins.
 ; The first directory created is the root directory, starting at cluster 0. It is spawned on-format.
 
 ; ** Note: FAT_LENGTH capped at <32640, due to how many sectors ata_write can do at once in the format stage
@@ -142,7 +144,50 @@ fat_next:
     pop ecx
     ret
 
-; EAX = index cluster, EBX = new cluster
+; Return EAX = avalible FAT cluster
+; Scan entire FAT volume for avalible clusters
+fat_scan:
+    push edi
+    push esi
+    push ecx
+    mov edi, page ; base ptr for comparison and reading disk
+    mov eax, dword FAT_OFFSET - 1 ; LBA incrementation
+    mov dword [loaded], dword 0xFFFFFFFF
+.loop_next:
+    ; EAX/EDI already loaded with LBA and buffer
+    mov cl, 1
+    inc eax
+    cmp eax, (FAT_LENGTH * 4) / 512 + FAT_OFFSET
+    ja .none
+    call ata_lba_read
+    xor esi, esi ; page offset
+    mov cl, 128 ; becomes counter
+.loop_c:
+    cmp dword [edi + esi], dword NONE
+    je .end
+    ; If not blank, inc
+    add esi, 4
+    dec cl
+    jz .loop_next
+    jmp .loop_c
+.end:
+    shr esi, 2 ; /4 to find cluster
+    sub eax, dword FAT_OFFSET ; localize LBA to FAT cluster
+    shr eax, 7 ; x 128 to go to cluster
+    add eax, esi
+    pop ecx
+    pop esi
+    pop edi
+    ret
+.none:
+    mov eax, 0xFFFFFFFF ; if failed
+    pop ecx
+    pop esi
+    pop edi
+    ret
+    
+
+; EAX = index cluster, EBX = new cluster value
 fat_update:
     push eax
     push ecx
@@ -235,8 +280,10 @@ fat_o_read:
 .end_scan:
     ret
 
+
 ; EAX = fat object ptr, EBX = directory entry cluster
 fat_mko:
+    pusha
     ; Firstly, find if there is space in the root cluster. Otherwise, continue, make a new cluster if needed.
     ; Recursivly search directory structure
     push eax ; pushed until we need it
@@ -251,7 +298,7 @@ fat_mko:
     xor ebp, ebp ; offset within the page
     xor ch, ch ; ch is the counter
 .loop_ava:
-    mov al, byte [page + ebp + 11]
+    mov al, byte [edi + ebp + 11]
     test al, al
     jz .avalible
     ; Otherwise, increment ebp and counter
@@ -264,9 +311,11 @@ fat_mko:
     xor ebp, ebp
     xor ch, ch
     mov eax, ebx
+    push eax ; save current cluster, in case we need a new one
     call fat_next
     cmp eax, dword EOC
     je .new ; make a new cluster
+    pop eax
     ; Otherwise read into the next one
     mov ebx, eax ; store the new cluster for the next-next, and for if it is avalible
     add eax, dword FAT_OFFSET
@@ -277,22 +326,55 @@ fat_mko:
 
 .new:
     ; TODO: Finish new, make the FAT update, provide clusters for navigators and make a function to search for unused clusters/dealloc
+    pop ecx ; the current end
+    call fat_scan
+    cmp eax, dword 0xFFFFFFFF
+    je 0
+    push eax
+    mov ebx, eax ; new cluster value
+    mov eax, ecx ; index to change
+    call fat_update
+    mov eax, ebx
+    mov ebx, dword EOC
+    call fat_update
+    pop ebx ; searched cluster
+    mov ebp, 0
+    mov edi, page
+    
 .avalible:
     ; EBX has the cluster needed, EBP contains the offset within the page region and EDI has the page itself
     ; Copy fat to desired spot
     pop esi ; ptr to struct
-    mov edi, page
-    add edi, ebp ; add page offset
-    mov ecx, 32 ; 32 bytes
-    call memcpy
-    mov eax, ebx
+    ; Scan for the next cluster avalible
+    call fat_scan
+    cmp eax, dword 0xFFFFFFFF
+    je 0
+    ; EAX has index
+    push ebx
+    mov ebx, dword EOC
+    call fat_update
+    pop ebx
+    ; Move EAX into the cluster
+    mov dword [esi + 12], eax
 
+    mov eax, ebx
     add eax, dword FAT_OFFSET
     add eax, (FAT_LENGTH * 4) / 512
     mov cl, 1
+    call ata_lba_read ; read before writing changes
+
+    add edi, ebp ; add page offset
+    mov ecx, 32 ; 32 bytes
+    call memcpy
+
+    mov edi, page
+    mov cl, 1
     call ata_lba_write ; commit changes
+    popa
     ret
 
+.err:
+    jmp 0
 
 ; EDI = destination, ESI = source, ECX = # of bytes
 memcpy:

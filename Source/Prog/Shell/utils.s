@@ -165,3 +165,18 @@ hexstr:
     mov byte [tstr + edx], 0
     mov eax, tstr
     ret
+
+; EDI = destination, ESI = source, ECX = # of bytes
+memcpy:
+    push esi
+    push edi
+    push ecx
+    cld
+.loop:
+    movsb ; Copy byte from [esi] to [edi], increments both
+    dec ecx
+    jnz .loop
+    pop ecx
+    pop edi
+    pop esi
+    ret

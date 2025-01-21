@@ -11,7 +11,7 @@ asm:
 	nasm "Source/Boot/interrupt.s" -f elf -o "Binaries/interrupt.o"
 	nasm "Source/Boot/driver.s" -f elf -o "Binaries/driver.o"
 	nasm "Source/Boot/proc.s" -f elf -o "Binaries/proc.o"
-	nasm "Source/Boot/file.s" -f elf -o "Binaries/file.o"
+	nasm "Source/Boot/NEWfile.s" -f elf -o "Binaries/file.o"
 
 # compile shell program on boot
 	nasm -felf32 "Source/Prog/Shell/shell.s" -f bin -o "Binaries/shell.bin"

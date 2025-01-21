@@ -13,7 +13,44 @@ start:
 test:
     db "Hello testers!",0
 
+fat_test_struct:
+    db "home",0,0,0,0
+    db "..."
+    db 2
+    dd 0 ; cluster, reserved
+    dd 0
+    dd 0
+    dd 512
+    dd 0
+fat_test_struct_2:
+    db "test_fil"
+    db "txt"
+    db 1
+    dd 0 ; cluster, reserved
+    dd 0
+    dd 0
+    dd 512
+    dd 0
+
+    
+; problem: FAT does not reflect the bitmap, random deallocations, etc.
 main:
+    ; Make a file, example
+    mov cl, 3
+.tloop:
+    mov eax, 0x40
+    mov ebx, 0
+    mov edi, fat_test_struct
+    int 0x80
+
+    mov eax, 0x40
+    mov ebx, 0
+    mov edi, fat_test_struct_2
+    int 0x80
+    dec cl
+    jnz .tloop
+
+
     ; Initialize the shell/keyboard drivers
     ; Add keyboard hook
     mov eax, 0x20
@@ -77,10 +114,11 @@ main:
     int 0x80
 
     ; Error: if yielding, only sometimes works
+.y_loop:
     mov eax, 0x31
     int 0x80
 
-    jmp $
+    jmp .y_loop
 
 ; inconsistant use of characters for some reason
 shell_kbd_hook:
@@ -461,6 +499,7 @@ shell_bg: db 0
 
 kbd_buffer: times 256 db 0
 shell_prompt: db "/$ ",0
+shell_dir: dd 0 ; root
 
 intro: db "Vara OS devshell loaded. Type 'help' for information.",10,0
 

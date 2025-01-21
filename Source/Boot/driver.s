@@ -150,12 +150,14 @@ ata_lba_write:
 ; Return EAX contains the pointer to the start (0 if failed)
 
 block_size equ 128              ; Example block size (adjust as needed)
-num_blocks equ 8192             ; Total number of blocks (adjust as needed)
-mem_table:
+num_blocks equ 65535             ; Total number of blocks (adjust as needed)
+;mem_table:
     ;db 0b11111100
-    resb num_blocks
+    ;resb num_blocks
 
-base_address equ 0x1000000      ; Base address of memory pool
+mem_table equ 0x1000000
+; Instead of a hard-coded table, have it be at the base ptr and then begin allocations after
+base_address equ 0x1000000 + num_blocks     ; Base address of memory pool
 
 
 ; Max # of blocks is 64 x 8, or 64KB
