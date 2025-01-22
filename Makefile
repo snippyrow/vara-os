@@ -27,7 +27,7 @@ run:
 	dd if=Binaries/k_loader.bin of=main.img bs=512 seek=1
 	dd if=Assets/font.bin of=main.img bs=512 seek=40
 	dd if=Binaries/shell.bin of=main.img bs=512 seek=50
-	dd if=/dev/zero bs=1 count=300000 >> main.img
+	dd if=/dev/zero bs=1M count=30 >> main.img
 # append 7100000 zeroes to convert to vdi
 
 	qemu-system-x86_64 \

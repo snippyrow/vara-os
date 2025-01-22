@@ -14,29 +14,29 @@ test:
     db "Hello testers!",0
 
 fat_test_struct:
-    db "home",0,0,0,0
+    db "home",0,0,0,0,0,0,0,0
     db "..."
     db 2
     dd 0 ; cluster, reserved
     dd 0
     dd 0
     dd 512
-    dd 0
 fat_test_struct_2:
-    db "test_fil"
+    db "test_fill",0,0,0
     db "txt"
     db 1
     dd 0 ; cluster, reserved
     dd 0
     dd 0
     dd 512
-    dd 0
 
+file_ex:
+    db "Hello, world! How are :)"
     
 ; problem: FAT does not reflect the bitmap, random deallocations, etc.
 main:
     ; Make a file, example
-    mov cl, 3
+    mov cl, 1
 .tloop:
     mov eax, 0x40
     mov ebx, 0
@@ -49,6 +49,13 @@ main:
     int 0x80
     dec cl
     jnz .tloop
+
+    ; Test write into the first file
+    mov eax, 0x42
+    mov ebx, 2 ; first file
+    mov ecx, 24
+    mov esi, guimain
+    int 0x80
 
 
     ; Initialize the shell/keyboard drivers
@@ -498,7 +505,9 @@ upper: db 0
 shell_bg: db 0
 
 kbd_buffer: times 256 db 0
-shell_prompt: db "/$ ",0
+shell_prompt:
+    db "$ ",0
+    resb 16 ; padding
 shell_dir: dd 0 ; root
 
 intro: db "Vara OS devshell loaded. Type 'help' for information.",10,0
@@ -512,3 +521,4 @@ video_info:
 
 %include "Source/Prog/Shell/cmd.s"
 %include "Source/Prog/Shell/utils.s"
+%include "Source/Prog/Shell/gui_test.s"

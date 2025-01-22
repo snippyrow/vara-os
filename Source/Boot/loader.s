@@ -30,6 +30,7 @@
 [extern fat_update]
 [extern fat_mko]
 [extern fat_read]
+[extern fat_write]
 
 Kernel_Start:
     ; IDT Has been defined, populate it with components
@@ -93,7 +94,7 @@ Kernel_Start:
     ; Now do a small test and jump to a loaded program
     mov eax, 50 ; Starting LBA
     mov edi, 0x50000 ; Program loaded location
-    mov cl, 7 ; # of sectors to read
+    mov cl, 12 ; # of sectors to read
     call ata_lba_read
 
     mov eax, 0x30
@@ -153,7 +154,7 @@ fat_test_struct:
 ;   EAX 0x31 = Yield Process to kernel
 ;   EAX 0x32 = Process Kill (ebx = PID)
 
-;   EAX 0x40 = Make FAT object (ebx = directory start cluster, edi = fat object ptr)
+;   EAX 0x40 = Make FAT object (ebx = directory start cluster, edi = fat object ptr, (optional) esi = ptr parent directory name) (esi is for the navigator to work)
 ;       The function takes care of different types of entries, such as parents, etc. Struct will be modified to reflect properties
 ;   EAX 0x41 = Read raw (ebx = raw cluster start, edi = buffer ptr, ecx = max clusters).. reads a directory/file, loads it to buffer
 ;   EAX 0x42 = Touch raw (ebx = file starting cluster, esi = data input buffer, ecx = data size)
@@ -196,7 +197,7 @@ Sys_Int_Handle:
     cmp eax, dword 0x41
     je .fat_rd
     cmp eax, dword 0x42
-    ;je .fat_wr
+    je .fat_wr
     cmp eax, dword 0x43
     ;je .fat_form
     iret
@@ -285,6 +286,13 @@ Sys_Int_Handle:
     pusha
     mov eax, ebx
     call fat_read
+    popa
+    iret
+.fat_wr:
+    pusha
+    mov eax, ebx
+    mov edi, esi
+    call fat_write
     popa
     iret
 
