@@ -1,23 +1,22 @@
-; CFAT32 Filesystem implementation
-; Each cluster is 512B, or one sector of the disk.
-; The FAT (File Allocation Table) is located in the first few clusters, and they are reserved
-; When referencing a cluster, it is automatically offset by the length of the FAT.
+; The new SFAT32 filesystem implementation, wirtten for faster access times
 
-; There can be 16 indexed objects in each cluster inside a directory, each is 32 bytes long
+; Each cluster will be 1024B, sitting after.
+; The volume contains 8192 superblocks, each indexing 8192 clusters. This gets us a total of 64GB of usable disk space
+; The s-block is just used for searching the FAT quicker
 
-; FAT Structure:
-; Each four bytes specify the properties of that cluster. For example, the first entry would correspond to cluster 0.
-; Files and directories appear the same, as it's just a file that gets treated differently
-; Special FAT definitions:
-; 0xFFFFFFFF - End-of-chain, for both directories and files.
-; 0x00FFFFFF - Empty cluster. This can be written to.
-; All FAT clusters defined are little-endian, where the smallest byte comes first.
-; Clusters in the data region can be used by both indexing and raw data for files and directories
+; After the entire FAT structure, lies the data region. This is where a majority of the data is actually stored; directories and files.
+; Directories and files are essentially the same, just with official ways of usage.
+; Inside a file, it simply works like a raw, until it hits an EOC. Objects can span multiple superblocks without issue, they have no real impact on how files work.
+; Writing to the disk is cheap relative from reading.
 
-; When you jump to a directory, it simply reloads. Otherwise locate the first cluster
-; Keep in mind that the starting cluster is in the directory object attributes
-
-; Inside a user directory, there is a special type of object called a navigator. It links up with info towards the parent directory struct.
+; Inside each sector of the disk, directories can hold a maximum of 16 entries, each being 32 bytes long.
+; char Object name[12]
+; char Object ext[3]
+; uint8_t attributes
+; uint32_t cluster
+; uint32_t modified
+; uint32_t created
+; uint32_t Object size
 
 ; FAT Object Attributes:
 ; 0x00 - Empty
@@ -28,371 +27,658 @@
 ; 0x10 - Raw
 ; 0x80 - Navigator
 
-; A directory cluster contains 16 subdirectories/files, that is structured like this: (minus 1 byte for rounding)
-; char Object name[8]
-; char Object ext[3]
-; uint8_t attributes
-; uint32_t cluster
-; uint32_t modified
-; uint32_t created
-; uint32_t Object size
-; uint32_t UUID
+; Within each directory there exists something called a navigator, for returning to the parent directory. It has a cluster attribute linking to it's parent directory start cluster.
 
-; The MBR is located on the first sector, and after comes the kernel code.
-; At the very start of the volume, a table called the superblock table exists. This table is loaded into memory at format, and is updated whenever needed.
-; The superblock table is designed to keep track of used clusters in the data region, and the FAT tracks where those clusters actually go. This is designed to improve scan times.
-; After some offset, the FAT as well as the filesystem begins.
-; The first directory created is the root directory, starting at cluster 0. It is spawned on-format.
+; Superblocks should be decoded from a normal cluster entry, with that going from 0-4294967296
+; In all cases where we must read from the disk:
+; Reading a file (FAT & data)
+; Scanning for an avalible cluster
 
-; ** Note: FAT_LENGTH capped at <32640, due to how many sectors ata_write can do at once in the format stage
-; The maximum number of entries per directory is 1024 due to memory limits
-FAT_OFFSET equ 200 ; 200 sector offset from code
-FAT_LENGTH equ 1024 ; 1024 clusters indexed in the FAT
-MAX_PER_DIR equ 1024
-Secotrs_Per_Cluster equ 1
+; Each superblock is structured as such: (assume 32 clusters per s-block, 1KB clusters)
+; As on the disk
+; The first 512 bytes:
+;   0-1      - # of allocated clusters
+;   2-511    - Bitmap of all allocated clusters (max)
+;   512-1536 - First cluster
 
-EOC equ 0xFFFFFFFF
+; The real location of clusters should be decoded from its pointer
+; ALL superblock headers should be loaded to memory
+; Update: ALL superblock headers are located in the first section of the volume one after another, for ease of use
+
+; Basically ensure all FAT locations have a cluster
+
+; Since cluster 0 should always be used, empty is now 0x00000000, and EOC is 0xFFFFFFFF
+NUM_SBLOCK equ 4 ; each one will index 4096 clusters
+OFFSET equ 200
+
+
+EOC  equ 0xFFFFFFFF
 NONE equ 0x00FFFFFF
 
-[global FAT_Format]
 [extern malloc]
 [extern free]
-[extern ata_lba_write]
 [extern ata_lba_read]
-[global fat_next]
-[global fat_update]
+[extern ata_lba_write]
+[global FAT_Format]
 [global fat_mko]
-[bits 32]
+[global fat_read]
+[global fat_write]
 
-; Each sector of the FAT can index 128 further clusters (sectors)
-; Format the entire FAT to empty clusters, in preperation for new files
-; Return EAX 0 if error
+; Format the volume, load blank caches and bitmaps
+; The header cache is a direct mirror of the hard disk, for easier writing
 FAT_Format:
-    ; Reserve a place for listing directory entries, and for keeping track of the clusters indexed in the FAT
-    mov eax, (MAX_PER_DIR * 32) + (MAX_PER_DIR / 32) * 4 ; First part for listing entires, second for clusters
+    ; Allocate space for all the counters. 
+    ; Since we probably wont have many superblocks, only use 512B (good for 256 superblocks)
+    mov eax, 512
     call malloc
     test eax, eax
-    jz .end
-    mov dword [list_ptr], eax ; move ptr
+    jz .failed
+    mov dword [counters], eax
+    mov edi, eax
+    mov eax, 0
+    mov ecx, 512
+    call memset_dword
 
-    ; Have the entire FAT loaded into memory to format
-    mov eax, dword FAT_LENGTH ; 512 bytes
-    shl eax, 2 ; x 4
-    mov ecx, eax
-    push ecx
+    ; Now allocate space for all bitmapped headers
+    ; Each superblock gets exactly 512B
+    mov eax, NUM_SBLOCK * 512
     call malloc
-    ; test
-    ;mov eax, 0x100000
     test eax, eax
-    jz .end ; If malloc failed
+    jz .failed
+    mov dword [bitmaps], eax
+    mov edi, eax
+    mov eax, 0
+    mov ecx, NUM_SBLOCK * 512
+    call memset_dword
 
-    mov edi, eax ; current ptr
-    mov ebp, eax ; base for the buffer
+    ; Allocate space for FAT
+    mov eax, 32 * 512
+    call malloc
+    test eax, eax
+    jz .failed
 
-    ; Fill buffer with all NONE, except for EOC for the root
-    ; ECX is already loaded with # of bytes
-    mov eax, dword NONE
-    mov ecx, dword [esp]
-.loop:
-    mov dword [edi], eax
-    add edi, 4
-    dec ecx
-    test ecx, ecx
-    jz .continue
-    jmp .loop
-.continue:
-    ; Add the first EOC
-    mov edi, ebp
-    mov dword [edi], dword EOC
-    ; Now write the entire FAT
-    mov eax, dword FAT_OFFSET
-    mov ecx, dword FAT_LENGTH
-    shr ecx, 7 ; / 128 for length in clusters of the disk
+    mov edi, eax
+    mov ecx, (32 * 512) / 4
+    mov eax, NONE
+    call memset_dword
+
+
+    ; Allocate space for an example FAT entry
+    mov eax, OFFSET + NUM_SBLOCK + 1 ; past bitmaps and counters
+    mov edx, NUM_SBLOCK ; counter
+.fat_loop:
+    mov cl, 32
+    call ata_lba_write
+    add eax, 32
+    dec edx
+    jnz .fat_loop
+
+    ; Now write all headers
+    mov eax, OFFSET
+    mov cl, 1
+    mov edi, dword [counters]
     call ata_lba_write
 
-    ; Free memory
-    mov eax, ebp
-    pop ebx
-    call free
+    ; Write headers
+    mov eax, OFFSET + 1
+    mov cl, NUM_SBLOCK
+    mov edi, dword [bitmaps]
+    call ata_lba_write
 
+    ; Now write FAT entries
+    ; Loop for each s-block, write in 32 LBA's each
+    
+    mov eax, 0
+    mov ebx, EOC
+    call _fat_update
     mov eax, 1 ; success
-.end:
     ret
 
-; EAX = input cluster, return EAX = next cluster (EOC if end)
-fat_next:
-    push ecx
+.failed:
+    xor eax, eax ; error code faield
+    ret
+
+; Return EAX = nearest returned cluster, 0 = failed
+; continually loop through smaller and smaller sections of the header cache until a usable sector is found
+_fat_scan:
     push edx
-    push edi
-    mov edx, eax
-    shr eax, 7 ; / 128
-    add eax, dword FAT_OFFSET
-    
-    cmp eax, dword [loaded]
-    je .send ; if the sector has already been cached
-    ; EAX now contains starting LBA
-    mov cl, 1
-    mov edi, page
-    call ata_lba_read
-    mov dword [loaded], eax ; save new value
-.send:
-    and edx, dword 0b01111111 ; mod 128
-    shl edx, 2 ; x 4 for dword
-    mov eax, dword [page + edx]
-    pop edi
+    push ecx
+    push ebx
+    push ebp
+    ; loop through superblocks
+    mov ecx, NUM_SBLOCK
+    xor edx, edx ; cluster index
+    xor ebx, ebx ; s-block counter
+.cnt_loop:
+    mov ebp, [counters]
+    cmp word [ebp], 4096
+    jb .continue ; if below max limit
+    add ebp, 2
+    add edx, 4096
+    inc ebx
+    dec ecx
+    jz .failed
+    jmp .cnt_loop
+.continue:
+    shl ebx, 9 ; x 512 for proper s-block section
+    mov ebp, [bitmaps]
+    add ebp, ebx
+    ; EBX is now redundant
+.d_loop:
+    ; Loop over the doublewords
+    cmp dword [ebp], 0xFFFFFFFF
+    jne .d_continue
+    add edx, 32
+    add ebp, 4
+    jmp .d_loop
+.d_continue:
+    mov eax, dword [ebp]
+    xor ecx, ecx ; bit index (CL)
+.d_bt:
+    ; loop over dword
+    bt eax, ecx
+    jnc .found
+    inc edx
+    inc ecx
+    jmp .d_bt
+.found:
+    mov eax, edx
+    pop ebp
+    pop ebx
+    pop ecx
     pop edx
+    ret
+.failed:
+    xor eax, eax
+    pop ebp
+    pop ebx
     pop ecx
+    pop edx
     ret
 
-; Return EAX = avalible FAT cluster
-; Scan entire FAT volume for avalible clusters
-fat_scan:
-    push edi
-    push esi
+
+; EAX = cluster index, return EAX = next cluster ID
+_fat_next:
+    push ebx
     push ecx
-    mov edi, page ; base ptr for comparison and reading disk
-    mov eax, dword FAT_OFFSET - 1 ; LBA incrementation
-    mov dword [loaded], dword 0xFFFFFFFF
-.loop_next:
-    ; EAX/EDI already loaded with LBA and buffer
-    mov cl, 1
-    inc eax
-    cmp eax, (FAT_LENGTH * 4) / 512 + FAT_OFFSET
-    ja .none
-    call ata_lba_read
-    xor esi, esi ; page offset
-    mov cl, 128 ; becomes counter
-.loop_c:
-    cmp dword [edi + esi], dword NONE
-    je .end
-    ; If not blank, inc
-    add esi, 4
-    dec cl
-    jz .loop_next
-    jmp .loop_c
-.end:
-    shr esi, 2 ; /4 to find cluster
-    sub eax, dword FAT_OFFSET ; localize LBA to FAT cluster
-    shr eax, 7 ; x 128 to go to cluster
-    add eax, esi
-    pop ecx
-    pop esi
-    pop edi
-    ret
-.none:
-    mov eax, 0xFFFFFFFF ; if failed
-    pop ecx
-    pop esi
-    pop edi
-    ret
-    
-
-; EAX = index cluster, EBX = new cluster value
-fat_update:
-    push eax
-    push ecx
-    push edx
     push edi
-    ; Cache the new sector
-    mov edx, eax
-    shr eax, 7 ; / 128
-    add eax, dword FAT_OFFSET
-
-    cmp eax, dword [loaded]
-    je .change
-
+    mov ebx, eax
+    shr eax, 7 ; / 128 to find LBA
+    and ebx, 0b01111111 ; mod 128 to find addr within LBA
+    shl ebx, 2 ; x 4 to get the real offset addr
+    add eax, OFFSET + NUM_SBLOCK + 1
     mov cl, 1
     mov edi, page
     call ata_lba_read
-    mov dword [loaded], eax ; save new value
-.change:
-    and edx, dword 0b01111111 ; mod 128
-    shl edx, 2 ; x 4 for dword
+
+    mov eax, dword [page + ebx]
+    pop edi
+    pop ecx
+    pop ebx
+    ret
+
+; Update a FAT entry and the surrounding bitmap
+; EAX = cluster index, EBX = new value.
+cluster_index: resd 1
+_fat_update:
+    push eax
+    push ebx
+    push ecx
+    push edx
+    push ebp
+    push edi
+
+    mov dword [cluster_index], eax
+    mov edx, eax
+
+    shr eax, 7 ; / 128 to find LBA
+    and edx, 0b01111111 ; mod 128 to find addr within LBA
+    shl edx, 2 ; x 4 to get the real offset addr
+    add eax, OFFSET + NUM_SBLOCK + 1
+    mov cl, 1
+    mov edi, page
+    call ata_lba_read
+
     mov dword [page + edx], ebx
-    ; EAX already has the required LBA, as does CL
-    mov edi, page
     call ata_lba_write
+    ; Now update counter
+
+    mov eax, dword [cluster_index]
+    mov ebx, eax ; backup
+    
+
+    ; Now allocate, EBX = cluster index
+    mov ebp, [bitmaps]
+    mov eax, ebx
+    mov ecx, ebx
+    shr eax, 3 ; / 8 to get byte
+    and ecx, 0b111 ; mod to get bit offset
+    mov dx, 1
+    shl dx, cl
+    xor ebx, ebx
+    mov bl, byte [ebp + eax]
+    bt ebx, ecx
+    jc .continue ; already a 1
+
+    ; Increment the counter
+    pusha
+    mov eax, dword [cluster_index]
+    shr eax, 12 ; / 4096 to get s-block
+    shl eax, 1 ; x 2 to get counter addr
+    mov ebp, dword [counters]
+    inc word [ebp + eax]
+    mov eax, OFFSET
+    mov cl, 1
+    mov edi, [counters]
+    call ata_lba_write ; commit new counter
+    popa
+
+.continue:
+
+    or bl, dl
+    mov byte [ebp + eax], bl
+
+    ; Write that s-block bitmap
+    mov eax, OFFSET + 1
+    mov cl, NUM_SBLOCK
+    mov edi, ebp
+    call ata_lba_write
+
     pop edi
+    pop ebp
     pop edx
     pop ecx
+    pop ebx
     pop eax
+    ; return when done
     ret
 
-; EAX = directory entry cluster, return EAX = ptr
-fat_dir_list:
-    ; loop through, adding to the list of all clusters
-    mov edi, dword [list_ptr]
-
-    ; Convert first cluster to LBA
-    ; EDI is restored after the ATA call
+; simply remove an already on cluster
+; EAX = cluster index
+fat_deallocate:
     push eax
-    add eax, dword FAT_OFFSET
-    add eax, (FAT_LENGTH * 4) / 512 ; go past FAT
+    mov ebx, eax
+    shr ebx, 7 ; FAT LBA
+    and eax, 0b01111111
+    shl eax, 2 ; x 4 for the absolute offset within sector
+    add ebx, OFFSET + NUM_SBLOCK + 1
     mov cl, 1
+    mov edi, page
     call ata_lba_read
-    add edi, 512
+    mov dword [edi + eax], NONE
+    call ata_lba_write
+    ; Now update counter & bitmap
+
     pop eax
-
-.fat_loop:
-    call fat_next
-    cmp eax, dword EOC
-    je .end_scan
-    ; Convert next cluster to LBA
-    push eax
-    add eax, dword FAT_OFFSET
-    add eax, (FAT_LENGTH * 4) / 512 ; go past FAT
-    call ata_lba_read
-    pop eax
-    add edi, 512
-    jmp .fat_loop
-.end_scan:
-    mov eax, dword [list_ptr]
-    ret
-
-
-; EAX = file cluster start, EBX = output ptr
-fat_o_read:
-    ; loop through, adding to the list of all clusters
-    mov edi, ebx
-
-    ; Convert first cluster to LBA
-    ; EDI is restored after the ATA call
-    push eax
-    add eax, dword FAT_OFFSET
-    add eax, (FAT_LENGTH * 4) / 512 ; go past FAT
+    mov ebx, eax
+    ; Divide cluster by 4096 to get s-block
+    shr eax, 12 ; / 4096
+    shl eax, 1 ; x 2 for word offset
+    mov edi, [counters]
+    dec word [edi + eax]
+    ; Write in counters
+    mov eax, OFFSET
+    ; CL/EDI is set
     mov cl, 1
-    call ata_lba_read
-    add edi, 512
-    pop eax
+    call ata_lba_write
 
-.fat_loop:
-    call fat_next
-    cmp eax, dword EOC
-    je .end_scan
-    ; Convert next cluster to LBA
-    push eax
-    add eax, dword FAT_OFFSET
-    add eax, (FAT_LENGTH * 4) / 512 ; go past FAT
-    call ata_lba_read
-    pop eax
-    add edi, 512
-    jmp .fat_loop
-.end_scan:
-    ret
+    ; Now update bitmap (cluster index in EBX)
+    ; Divide by 8 to get the bit
+    ; Mod 8 for bit index
+    mov eax, ebx
+    shr eax, 3 ; / 8
+    and ecx, 0b111 ; mod
+    mov dx, 1
+    shl dx, cl
+    mov edi, [bitmaps]
+    mov bl, byte [edi + eax]
+    not dl
+    and bl, dl
+    mov byte [edi + eax], bl
+
+    ; Now update all bitmaps
+    mov eax, OFFSET + 1
+    mov cl, NUM_SBLOCK
+    ; EDI loaded
+    call ata_lba_write
+
+    ret ; end, return
 
 
-; EAX = fat object ptr, EBX = directory entry cluster
+
+
+; EAX = directory entry cluster, EBX = ptr to fat object, ESI = parent directory name (for the navigator class)
+; First, find a superblock with enough clusters
+; Firstly, it shoudl usually work with a single cluster avalible for the first in a raw, however if the directory structure is too large, it requires two.
+; Check if the directory entry will require an extra cluster, and scan accordingly.
+; Once found, either/or add a new FAT entry that works for the file. Extend the directory if needed.
+; Since searching a chain may use many disk reads, use a cache just in case. Scanning can be done with memory only
+dir_lba: resd 1
+dir_cluster: resd 1
 fat_mko:
     pusha
-    ; Firstly, find if there is space in the root cluster. Otherwise, continue, make a new cluster if needed.
-    ; Recursivly search directory structure
-    push eax ; pushed until we need it
-    mov edi, page
-    mov eax, ebx
-    add eax, dword FAT_OFFSET
-    add eax, (FAT_LENGTH * 4) / 512
-    mov cl, 1
-    mov dword [loaded], dword 0xFFFFFFFF ; disable for this command
+    push esi
+    ; First search directory structure
+    ; Look through to see if a spot is avalible
+    mov dword [dir_cluster], eax
+    shl eax, 1 ; x 2 since there are two sectors per cluster (1KB)
+    add eax, OFFSET + (NUM_SBLOCK * 32) + NUM_SBLOCK + 1
+    mov dword [dir_lba], eax
+    mov cl, 2
+    mov edi, page_raw
+
     call ata_lba_read
-    
-    xor ebp, ebp ; offset within the page
-    xor ch, ch ; ch is the counter
-.loop_ava:
-    mov al, byte [edi + ebp + 11]
-    test al, al
-    jz .avalible
-    ; Otherwise, increment ebp and counter
-    inc ch
+    mov dx, 32 ; 32 possible entries
+    mov ebp, page_raw ; for attribute
+.loop_dir:
+    mov ch, byte [ebp + 15]
+    test ch, ch
+    jz .found ; found an avalible spot
     add ebp, 32
-    cmp ch, 16
-    jb .loop_ava
-.new_load:
-    ; If we are out of spots in this cluster
-    xor ebp, ebp
-    xor ch, ch
-    mov eax, ebx
-    push eax ; save current cluster, in case we need a new one
-    call fat_next
-    cmp eax, dword EOC
-    je .new ; make a new cluster
-    pop eax
-    ; Otherwise read into the next one
-    mov ebx, eax ; store the new cluster for the next-next, and for if it is avalible
-    add eax, dword FAT_OFFSET
-    add eax, (FAT_LENGTH * 4) / 512
-    ; cl/edi is set
-    call ata_lba_read
-    jmp .loop_ava
-
-.new:
-    ; TODO: Finish new, make the FAT update, provide clusters for navigators and make a function to search for unused clusters/dealloc
-    pop ecx ; the current end
-    call fat_scan
-    cmp eax, dword 0xFFFFFFFF
-    je 0
-    push eax
-    mov ebx, eax ; new cluster value
-    mov eax, ecx ; index to change
-    call fat_update
-    mov eax, ebx
-    mov ebx, dword EOC
-    call fat_update
-    pop ebx ; searched cluster
-    mov ebp, 0
-    mov edi, page
-    
-.avalible:
-    ; EBX has the cluster needed, EBP contains the offset within the page region and EDI has the page itself
-    ; Copy fat to desired spot
-    pop esi ; ptr to struct
-    ; Scan for the next cluster avalible
-    call fat_scan
-    cmp eax, dword 0xFFFFFFFF
-    je 0
-    ; EAX has index
+    dec dx
+    jz .new ; new must be loaded/made
+    jmp .loop_dir
+.found:
+    ; Scan for an avalible cluster
+    call _fat_scan
+    test eax, eax
+    jz .failed
+    ; Set cluster dword
+    mov dword [ebx + 16], eax
     push ebx
-    mov ebx, dword EOC
-    call fat_update
+    mov esi, ebx
+    mov ebx, EOC
+    call _fat_update
+
+    ; copy memory
+    mov edi, ebp
+    mov ecx, 32
+    call memcpy
+    mov ebp, eax ; copy the newly scanned cluster
+    mov eax, dword [dir_lba]
+    mov edi, page_raw
+    mov cl, 2
+    ; EAX already loaded
+    call ata_lba_write ; commit
+
+    ; If it is a directory, automatically insert a navigator linking to the parent directory
     pop ebx
-    ; Move EAX into the cluster
-    mov dword [esi + 12], eax
+    cmp byte [ebx + 15], 2
+    je .addnav
+    pop esi
+    popa
+    ret
+    ; now commit LBA
+.addnav:
+    mov edi, page_raw
+    mov eax, 0
+    mov ecx, 256
+    call memset_dword ; prepare to insert
+    
+    mov eax, ebp
 
-    mov eax, ebx
-    add eax, dword FAT_OFFSET
-    add eax, (FAT_LENGTH * 4) / 512
-    mov cl, 1
-    call ata_lba_read ; read before writing changes
-
-    add edi, ebp ; add page offset
-    mov ecx, 32 ; 32 bytes
+    mov ecx, 32
+    mov esi, navigator_template
+    ; EDI is set
+    call memcpy
+    
+    mov edx, dword [dir_cluster]
+    mov dword [edi + 16], edx ; set parent cluster
+    ; Copy FAT object name to nav name
+    pop esi
+    mov ecx, 12
     call memcpy
 
-    mov edi, page
-    mov cl, 1
-    call ata_lba_write ; commit changes
+    shl eax, 1
+    add eax, OFFSET + (NUM_SBLOCK * 32) + NUM_SBLOCK + 1
+    mov cl, 2
+    ; EDI is set
+    call ata_lba_write
+
+
+    popa
+    ret
+.new:
+    ; Find next
+    mov eax, dword [dir_cluster]
+    call _fat_next
+    cmp eax, EOC
+    je .gen
+    ; Otherwise if not EOC, load
+    mov dword [dir_cluster], eax
+    shl eax, 1
+    add eax, OFFSET + (NUM_SBLOCK * 32) + NUM_SBLOCK + 1
+    mov dword [dir_lba], eax
+    mov cl, 2
+    mov edi, page_raw
+    call ata_lba_read
+
+    mov dx, 32 ; 32 possible entries
+    mov ebp, page_raw ; for attribute
+    jmp .loop_dir
+.gen:
+    ; Generate new
+    call _fat_scan
+    test eax, eax
+    jz .failed
+    push eax
+    push ebx
+    ; Update current directory link
+    mov ebx, eax
+    mov eax, dword [dir_cluster]
+    call _fat_update
+
+    ; Update new
+    mov eax, ebx
+    mov ebx, EOC
+    call _fat_update
+
+    pop ebx
+    pop eax
+
+    shl eax, 1
+    add eax, OFFSET + (NUM_SBLOCK * 32) + NUM_SBLOCK + 1
+    push eax
+    mov edi, page_raw
+    mov ecx, 1024 / 4
+    mov eax, 0
+    call memset_dword
+
+    pop eax
+    mov edi, page_raw
+    mov ecx, 32
+    mov esi, ebx
+    call memcpy
+    mov cl, 2
+    call ata_lba_write ; commit new write
+
+    popa
+    ret
+.failed:
+    pop esi
+    popa
+    xor eax, eax
+    ret
+
+; EAX = raw entry cluster, EDI = ptr to buffer, ECX = max # of clusters to read
+fat_read:
+    pusha
+    mov ebp, edi
+    mov ebx, ecx ; new counter
+    mov edx, eax ; backup
+    ; convert to LBA
+    shl eax, 1
+    add eax, OFFSET + (NUM_SBLOCK * 32) + NUM_SBLOCK + 1
+    mov cl, 2
+    mov edi, page_raw
+.read:
+    call ata_lba_read
+    mov ecx, 1024
+    mov edi, ebp
+    mov esi, page_raw
+    call memcpy
+    dec ebx
+    jz .end
+
+    ; Load new and repeat
+    add ebp, 1024
+    mov eax, edx
+    call _fat_next
+    mov edx, eax
+    shl eax, 1
+    add eax, OFFSET + (NUM_SBLOCK * 32) + NUM_SBLOCK + 1
+    mov cl, 2
+    mov edi, page_raw
+    jmp .read
+
+.end:
     popa
     ret
 
-.err:
-    jmp 0
+; EAX = raw file begin, EDI = ptr to buffer, ECX = size of buffer
+; Be able to allocate and deallocate clusters
+fat_write:
+    mov ebp, edi ; back-up
+    cld ; incrementing
+    mov esi, ebp
+    mov edi, page_raw
+    mov bx, 1024 ; cluster size
+.loop:
+    movsb ; copy from ESI to EDI (buffer -> page)
+    dec bx
+    jz .load_new
+    dec ecx
+    jnz .loop
+    jmp .end
+.load_new:
+    ; If we end our cluster
+    push eax
+    shl eax, 1
+    add eax, OFFSET + (NUM_SBLOCK * 32) + NUM_SBLOCK + 1
+    mov cl, 2
+    mov edi, page_raw
+
+    call ata_lba_write ; commit
+    ; Find next and repeat
+    pop eax
+    call _fat_next
+    cmp eax, EOC
+    je .expand
+    ; If not, simply load next
+    mov bx, 1024
+    mov esi, ebp
+    mov edi, page_raw
+
+    dec ecx
+    jz .end
+    jmp .loop
+.expand:
+    ; Same procedure as load new, but instead generate a new location
+    push eax
+    call _fat_scan
+    mov ebx, eax
+    pop eax
+    call _fat_update ; update current file to link to the next cluster
+    mov eax, ebx
+    mov ebx, EOC
+    call _fat_update
+    ; EAX now has new cluster, zero it out
+    push eax
+    push ecx
+    mov al, 0
+    mov ecx, 1024
+    call memset
+    pop ecx
+    pop eax
+
+    mov bx, 1024
+    mov esi, ebp
+    mov edi, page_raw
+
+    jmp .loop
+
+.end:
+    ; If done, resume by zeroing the rest of the raw cluster and commit
+    ; bx = how many left
+    push eax ; current cluster
+    movzx ecx, bx
+    mov edi, page_raw
+    mov ebx, 1024
+    sub ebx, ecx
+    add edi, ebx
+    mov al, 0
+    call memset
+    pop eax
+    shl eax, 1
+    add eax, OFFSET + (NUM_SBLOCK * 32) + NUM_SBLOCK + 1
+    mov cl, 2
+    mov edi, page_raw
+    call ata_lba_write ; commit
+    ; Now deallocate all remaining clusters beyond this point
+    ret
+
+
 
 ; EDI = destination, ESI = source, ECX = # of bytes
 memcpy:
     push esi
     push edi
+    push ecx
     cld
 .loop:
     movsb ; Copy byte from [esi] to [edi], increments both
     dec ecx
     jnz .loop
+    pop ecx
     pop edi
     pop esi
     ret
 
-; Fast 512-byte page instead of needing malloc
+
+; EDI = destination ptr, EAX = replace dword, ECX = # of dwords
+memset_dword:
+    push edi
+    push ecx
+.loop:
+    mov dword [edi], eax
+    add edi, 4
+    dec ecx
+    jnz .loop
+    pop ecx
+    pop edi
+    ret
+
+; EDI = destination ptr, al = replace byte, ECX = # of bytes
+memset:
+    push edi
+    push ecx
+.loop:
+    mov byte [edi], al
+    inc edi
+    dec ecx
+    jnz .loop
+    pop ecx
+    pop edi
+    ret
+
+; Temporary page for using LBA
 page:
     resb 512
-loaded:
-    dd 0xFFFFFFFF ; The currently loaded LBA, to enable caches
-list_ptr:
-    resd 1 ; points to malloc'd ptr for listing entries in a directroy and for counting clusters
+
+page_raw:
+    resb 1024
+
+bitmaps: ; bitmaps for each superblock index
+    resd 1
+
+counters: ; counters
+    resd 1
+
+navigator_template:
+    db "../",0,0,0,0,0,0,0,0,0
+    db 0,0,0
+    db 0x80
+    dd 0 ; cluster
+    dd 0
+    dd 0
+    dd 0

@@ -11,10 +11,14 @@ asm:
 	nasm "Source/Boot/interrupt.s" -f elf -o "Binaries/interrupt.o"
 	nasm "Source/Boot/driver.s" -f elf -o "Binaries/driver.o"
 	nasm "Source/Boot/proc.s" -f elf -o "Binaries/proc.o"
-	nasm "Source/Boot/NEWfile.s" -f elf -o "Binaries/file.o"
+	nasm "Source/Boot/file.s" -f elf -o "Binaries/file.o"
 
 # compile shell program on boot
 	nasm -felf32 "Source/Prog/Shell/shell.s" -f bin -o "Binaries/shell.bin"
+
+	nasm -felf32 "Source/Prog/Sys/bootmenu.s" -f bin -o "Binaries/bootmenu.bin"
+	nasm -felf32 "Source/Prog/Virus/virus.s" -f bin -o "Binaries/virus.bin"
+	nasm -felf32 "Source/Prog/Usage/memusage.s" -f bin -o "Binaries/memusage.bin"
 # nasm "Source/Asm/proc.s" -f elf -o "Binaries/proc.o"
 # /usr/local/i386elfgcc/bin/i386-elf-gcc $(CFLAGS) -c Source/Utilities/Util.cpp -o Binaries/util.o
 
@@ -27,6 +31,9 @@ run:
 	dd if=Binaries/k_loader.bin of=main.img bs=512 seek=1
 	dd if=Assets/font.bin of=main.img bs=512 seek=40
 	dd if=Binaries/shell.bin of=main.img bs=512 seek=50
+	dd if=Binaries/bootmenu.bin of=main.img bs=512 seek=70
+	dd if=Binaries/virus.bin of=main.img bs=512 seek=90
+	dd if=Binaries/memusage.bin of=main.img bs=512 seek=91
 	dd if=/dev/zero bs=1M count=30 >> main.img
 # append 7100000 zeroes to convert to vdi
 
@@ -53,3 +60,5 @@ run:
 # TODO:
 #	Write syscalls for filesystem
 #	Process management
+#	Text editor
+#	KnitC compiler

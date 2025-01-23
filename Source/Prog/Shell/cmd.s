@@ -417,26 +417,54 @@ run:
     mov ebx, dword [edi + 28] ; size
     shr ebx, 10 ; / 1024
     inc ebx ; add 1
-    mov ecx, ebx ; # of clusters to read
-    shl ebx, 10 ; x 1024 integer
-    ; divide, then multiply by 1024, rounding up
-
+    mov edx, ebx ; total # of clusters to read
+    
     mov eax, 0x1A
+    mov ebx, 1024
     int 0x80 ; malloc
     test eax, eax
     jz .oom ; no memory
+    push eax
 
-    ; read executable file
-    mov ebp, edi
+    ; read first cluster of executable file, then read the headers for that file
+    mov ebp, edi ; move the FAT object here
     mov edi, eax
     mov eax, 0x41
     mov ebx, dword [ebp + 16] ; get cluster for file
-    ; ECX is loaded
+    mov ecx, 1
     int 0x80 ; read file
+
+    ; Read file in its entierety again
+    push edi
+    mov ecx, edx
+    mov edx, dword [edi]
+    mov edi, edx ; origin address
+    mov eax, 0x41
+    mov ebx, dword [ebp + 16] ; get cluster for file
+    int 0x80 ; read file
+    pop edi ; header
 
     ; Spawn process
     mov eax, 0x30
-    mov ebx, edi
+    mov ebx, dword [edi + 4] ; start addr
+    int 0x80
+    ; Return EAX is the PID
+    ; Pass in the PID
+    mov dword [edi + 8], eax
+
+    ; Free memory
+    pop ebx
+    mov eax, 0x1B
+    mov ecx, 1024
+    int 0x80
+
+    ; Now important, de-register the keyboard from the shell. When yielded back, it will check and re-register if not already done so.
+    mov byte [kbd_enabled], 0
+    mov eax, edi
+    add eax, 12 ; ptr to alive header flag
+    mov dword [program_running], edi ; ptr
+    mov eax, 0x21
+    mov ebx, shell_kbd_hook
     int 0x80
 
     jmp .end ; will be yielded automatically
@@ -470,3 +498,5 @@ run_ext:
     db 0
 
 %include "Source/Prog/Shell/hexedit.s"
+
+dead: db 0

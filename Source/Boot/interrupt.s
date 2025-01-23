@@ -9,6 +9,8 @@
 [global Kbd_Hooks]
 [global Kbd_Test]
 [global PIT_Hooks]
+[global Stdout_Int_Handle]
+[global STDOUT_Hooks]
 
 [extern V_FRAME_ADDR]
 [extern V_UPDATE]
@@ -114,10 +116,11 @@ PIT_Config:
 NC: db 0
 
 PIT_Hooks:
-    dd Test_PIT
+    ;dd Test_PIT
     times 32 dd 0 ; 32 possible func ptrs
 
 PIT_Int_Handle:
+    cli
     pusha
     xor eax, eax
     mov cl, byte 0 ; Loop counter for iteration
@@ -139,6 +142,7 @@ PIT_Int_Handle:
     mov al, 0x20
     out 0x20, al
     popa
+    sti
     iret
 
 Test_PIT:
@@ -154,6 +158,7 @@ Kbd_Hooks:
 ; CL  = loop counter (up to 32)
 ; EDI = function vector
 Kbd_Int_Handle:
+    cli
     pusha
     xor eax, eax
     in al, 0x60
@@ -177,6 +182,7 @@ Kbd_Int_Handle:
     mov al, 0x20
     out 0x20, al
     popa
+    sti
     iret
 
 
@@ -215,3 +221,34 @@ Kbd_Test:
     int 0x80
 
     ret
+
+; STDOUT manager
+STDOUT_Hooks:
+    times 64 dd 0 ; 64 possible function pointers
+
+; EAX contains the thing that needs forwarding
+Stdout_Int_Handle:
+    cli
+    pusha
+    ; EAX is preserved
+    mov cl, byte 0 ; Loop counter for iteration
+    mov edi, STDOUT_Hooks
+.iterate:
+    cmp cl, byte 64
+    je .end
+    mov ebx, dword [edi]
+    test ebx, ebx
+    jz .skip
+    pusha
+    ; scancode is already in AL, and is restored after the function
+    call ebx
+    popa
+.skip:
+    inc cl
+    add edi, 4
+    jmp .iterate
+.end:
+    popa
+    sti
+    iret
+

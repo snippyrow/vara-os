@@ -13,50 +13,59 @@ start:
 test:
     db "Hello testers!",0
 
-fat_test_struct:
+boot_struct:
+    db "tutorial",0,0,0,0
+    db "run"
+    db 1
+    dd 0 ; cluster, reserved
+    dd 0
+    dd 0
+    dd 1024
+
+tut_dir:
     db "home",0,0,0,0,0,0,0,0
     db "..."
     db 2
     dd 0 ; cluster, reserved
     dd 0
     dd 0
-    dd 512
-fat_test_struct_2:
-    db "test_fill",0,0,0
-    db "txt"
-    db 1
-    dd 0 ; cluster, reserved
     dd 0
-    dd 0
-    dd 512
 
 file_ex:
     db "Hello, world! How are :)"
     
 ; problem: FAT does not reflect the bitmap, random deallocations, etc.
 main:
-    ; Make a file, example
-    mov cl, 1
-.tloop:
+    ; Create boot function
     mov eax, 0x40
     mov ebx, 0
-    mov edi, fat_test_struct
+    mov edi, boot_struct
     int 0x80
 
     mov eax, 0x40
     mov ebx, 0
-    mov edi, fat_test_struct_2
+    mov edi, tut_dir
     int 0x80
-    dec cl
-    jnz .tloop
+    
+    ; To copy the boot program (the one that is given at boot) copy the memory from some LBA into the file
+    ; Malloc enough space (give about 16KB)
+    mov eax, 0x1A
+    mov ebx, 0x4000
+    int 0x80
+    ; Assume we have enough at runtime
+    ; Read the disk into the buffer
+    mov edi, eax
+    mov eax, 0x18
+    mov ebx, 70
+    mov cl, 25
+    int 0x80
 
-    ; Test write into the first file
+    ; Write compiled data
     mov eax, 0x42
-    mov ebx, 2 ; first file
-    mov ecx, 24
-    mov esi, guimain
+    mov ebx, 1 ; cluster start
+    mov ecx, 1000 ; 1000 bytes seems okay
+    mov esi, edi
     int 0x80
-
 
     ; Initialize the shell/keyboard drivers
     ; Add keyboard hook
@@ -64,10 +73,21 @@ main:
     mov ebx, shell_kbd_hook
     int 0x80
 
+    mov byte [kbd_enabled], 1
+
     ; Add PIT hook
     mov eax, 0x24
     mov ebx, cur_hook
     int 0x80
+
+    ; Add STDOUT hook
+    mov eax, 0x35
+    mov ebx, stdout_hookf
+    int 0x80
+
+    ; Inserted here, but works. Used for creating directories
+    mov eax, dword [tut_dir + 16] ; get modified cluster
+    call directorysetup
 
     ; Request critical video information
     mov eax, 0x16
@@ -124,6 +144,19 @@ main:
 .y_loop:
     mov eax, 0x31
     int 0x80
+    
+    mov eax, [program_running]
+    mov bl, byte [eax]
+    test bl, bl
+    jnz .y_loop
+
+    cmp byte [kbd_enabled], 0 ; make sure to not reclaim every cycle
+    jne .y_loop
+
+    mov eax, 0x20
+    mov ebx, shell_kbd_hook
+    int 0x80
+    mov byte [kbd_enabled], 1
 
     jmp .y_loop
 
@@ -485,6 +518,14 @@ cur_hook:
     int 0x80
     ret
 
+stdout_hookf:
+    ; EAX has the obejct required
+    call tty_printstr
+    ; Render changes
+    mov eax, 0x10
+    int 0x80
+    ret
+
 
 
 section .data
@@ -509,6 +550,8 @@ shell_prompt:
     db "$ ",0
     resb 16 ; padding
 shell_dir: dd 0 ; root
+kbd_enabled: resb 1 ; is the keyboard registered?
+program_running: resd 1 ; ptr to whether the program is alive (for reclaiming the keyboard)
 
 intro: db "Vara OS devshell loaded. Type 'help' for information.",10,0
 
@@ -522,3 +565,4 @@ video_info:
 %include "Source/Prog/Shell/cmd.s"
 %include "Source/Prog/Shell/utils.s"
 %include "Source/Prog/Shell/gui_test.s"
+%include "Source/Prog/Shell/dirsetup.s"

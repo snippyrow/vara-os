@@ -4,7 +4,6 @@
 [extern V_WORK_BUFF]
 [extern V_DrawRect]
 [extern V_UPDATE]
-[extern V_TEST_B]
 [extern PIT_Int_Handle]
 [extern IDT_Add]
 [extern Kbd_Int_Handle]
@@ -26,11 +25,12 @@
 [extern PIT_Hooks]
 [extern ata_lba_write]
 [extern FAT_Format]
-[extern fat_next]
-[extern fat_update]
 [extern fat_mko]
 [extern fat_read]
 [extern fat_write]
+[extern Stdout_Int_Handle]
+[extern STDOUT_Hooks]
+[extern mem_table]
 
 Kernel_Start:
     ; IDT Has been defined, populate it with components
@@ -52,6 +52,12 @@ Kernel_Start:
     ; Start up core interrupt
     push dword Sys_Int_Handle
     push dword 0x80
+    call IDT_Add
+    add esp, 8
+
+    ; Attach basic STDOUT
+    push dword Stdout_Int_Handle
+    push dword 0x70
     call IDT_Add
     add esp, 8
     
@@ -153,13 +159,19 @@ fat_test_struct:
 ;   EAX 0x30 = Spawn Process (ebx = starting addr, return eax = PID (0 if failed))
 ;   EAX 0x31 = Yield Process to kernel
 ;   EAX 0x32 = Process Kill (ebx = PID)
+;   EAX 0x35 = Hook STDOUT (ebx = ptr to function).. hooks a function, so that whenever standard output is sent it repeats for everything here
+;   EAX 0x36 = Unhook STDOUT (ebx = ptr to function).. unhooks the desired function to STDOUT
+;   EAX 0x37 = Get hook info (eax = ptr to KBD hooks, ebx = ptr to PIT hooks, ecx = ptr to STDOUT hooks, edx = ptr to malloc memory table)
 
 ;   EAX 0x40 = Make FAT object (ebx = directory start cluster, edi = fat object ptr, (optional) esi = ptr parent directory name) (esi is for the navigator to work)
 ;       The function takes care of different types of entries, such as parents, etc. Struct will be modified to reflect properties
 ;   EAX 0x41 = Read raw (ebx = raw cluster start, edi = buffer ptr, ecx = max clusters).. reads a directory/file, loads it to buffer
 ;   EAX 0x42 = Touch raw (ebx = file starting cluster, esi = data input buffer, ecx = data size)
 ;   EAX 0x43 = Format FAT to empty clusters (deletes everything!)
+
+; NOTE: Use int 0x70 for sending through stdout (EAX = ptr to object)
 Sys_Int_Handle:
+    cli
     cmp eax, dword 0x10
     je .v_render
     cmp eax, dword 0x12
@@ -192,19 +204,26 @@ Sys_Int_Handle:
     cmp eax, dword 0x25
     je .pit_unhook
 
+    cmp eax, dword 0x35
+    je .stdout_hook
+    cmp eax, dword 0x36
+    je .stdout_unhook
+
     cmp eax, dword 0x40
     je .fat_mk
     cmp eax, dword 0x41
     je .fat_rd
     cmp eax, dword 0x42
     je .fat_wr
-    cmp eax, dword 0x43
-    ;je .fat_form
+    cmp eax, dword 0x37
+    je .ret_hooks
+    sti
     iret
 .v_render:
     pusha
     call V_UPDATE
     popa
+    sti
     iret
 .v_render_rect:
     pusha
@@ -213,6 +232,7 @@ Sys_Int_Handle:
     mov cl, dl
     call V_DrawRect
     popa
+    sti
     iret
 .v_render_dchar:
     pusha
@@ -221,6 +241,7 @@ Sys_Int_Handle:
     mov bh, ch
     call V_DrawChar
     popa
+    sti
     iret
 .v_ret_info:
     mov eax, VBE_Info
@@ -232,12 +253,14 @@ Sys_Int_Handle:
     mov eax, ebx
     call ata_lba_read
     popa
+    sti
     iret
 .ata_write:
     pusha
     mov eax, ebx
     call ata_lba_write
     popa
+    sti
     iret
 .m_ret:
     resd 1
@@ -248,6 +271,7 @@ Sys_Int_Handle:
     mov dword [.m_ret], eax
     popa
     mov eax, dword [.m_ret]
+    sti
     iret
 .i_free:
     pusha
@@ -255,6 +279,7 @@ Sys_Int_Handle:
     mov ebx, ecx
     call free
     popa
+    sti
     iret
 .proc_create:
     pusha
@@ -263,6 +288,7 @@ Sys_Int_Handle:
     mov dword [.m_ret], eax
     popa
     mov eax, dword [.m_ret]
+    sti
     iret
 .proc_yield:
     pusha
@@ -274,6 +300,7 @@ Sys_Int_Handle:
     mov eax, ebx
     call process_destroy
     popa
+    sti
     iret
 .fat_mk:
     push ebx
@@ -287,6 +314,7 @@ Sys_Int_Handle:
     mov eax, ebx
     call fat_read
     popa
+    sti
     iret
 .fat_wr:
     pusha
@@ -294,6 +322,59 @@ Sys_Int_Handle:
     mov edi, esi
     call fat_write
     popa
+    sti
+    iret
+.ret_hooks
+    mov eax, Kbd_Hooks
+    mov ebx, PIT_Hooks
+    mov ecx, STDOUT_Hooks
+    mov edx, mem_table
+    sti
+    iret
+
+.stdout_hook:
+    pusha
+    mov cl, byte 0 ; Loop counter for iteration
+    mov edi, STDOUT_Hooks
+.iterate_std:
+    cmp cl, byte 64
+    je .end_std
+    mov edx, dword [edi]
+    test edx, edx
+    jnz .skip_std
+    ; Found a function ptr that is 0, update
+    mov dword [edi], ebx
+    jmp .end_std
+.skip_std:
+    inc cl
+    add edi, 4
+    jmp .iterate_std
+.end_std:
+    popa
+    sti
+    iret
+
+
+.stdout_unhook:
+    pusha
+    mov cl, byte 0 ; Loop counter for iteration
+    mov edi, STDOUT_Hooks
+.iterate_unstd:
+    cmp cl, byte 64
+    je .end_unstd
+    mov edx, dword [edi]
+    cmp edx, ebx
+    jne .skip_unstd
+    ; Skip if not equal to the function ptr, otherwise set it
+    mov dword [edi], dword 0x0
+    jmp .end_unstd
+.skip_unstd:
+    inc cl
+    add edi, 4
+    jmp .iterate_unstd
+.end_unstd:
+    popa
+    sti
     iret
 
 ; Loop through the hook table maximum 32 times, set the function located in ebx.
@@ -317,6 +398,7 @@ Sys_Int_Handle:
     jmp .iterate
 .end:
     popa
+    sti
     iret
 
 ; Set a ptr in the hook table to 0 based off of function ptr in EBX
@@ -339,6 +421,7 @@ Sys_Int_Handle:
     jmp .iterate_u
 .end_u:
     popa
+    sti
     iret
 
 .pit_hook:
@@ -360,6 +443,7 @@ Sys_Int_Handle:
     jmp .iterate_v1
 .end_v1:
     popa
+    sti
     iret
 
 .pit_unhook:
@@ -381,4 +465,5 @@ Sys_Int_Handle:
     jmp .iterate_u1
 .end_u1:
     popa
+    sti
     iret

@@ -107,7 +107,7 @@ strint:
 ; EAX is the uint32, return EAX is ptr for string, 0 if failed
 ; CL is the mandated number of digits
 
-; Malloc is BROKEN!
+
 tstr:
     resb 32
 tstr2:
