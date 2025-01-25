@@ -11,6 +11,9 @@
 [global PIT_Hooks]
 [global Stdout_Int_Handle]
 [global STDOUT_Hooks]
+[global Mouse_Int_Handle]
+[global Mouse_Hooks]
+[global Mouse_Init]
 
 [extern V_FRAME_ADDR]
 [extern V_UPDATE]
@@ -34,7 +37,7 @@ IDT_Remap:
     ; ICW3
     mov al, 4
     out 0x21, al
-    mov al, 0x28
+    mov al, 2
     out 0xA1, al
 
     ; ICW4
@@ -48,9 +51,9 @@ IDT_Remap:
     out 0xA1, al
 
     ; Mask interrupts
-    mov al, 0b11111011 ; mask everything but cascade
+    mov al, 0b11111000 ; mask everything but cascade
     out 0x21, al
-    mov al, 0b11111111 ; mask all
+    mov al, 0b11101111 ; mask all
     out 0xA1, al
 
     ret
@@ -252,3 +255,120 @@ Stdout_Int_Handle:
     sti
     iret
 
+; Insetad of simply sending each hook once per IRQ, the mouse will instead need three IRQs to assemble a valid data-packet
+; If each hook were to be sent one byte at a time, they may turn on at odd times and go out of sync.
+; After all three bytes were sent, send each down to the hooks.
+
+Mouse_Hooks:
+    times 32 dd 0
+
+dapacket: resb 4
+mou_cycle: db 1
+
+Mouse_Int_Handle:
+    pusha
+    in al, 0x64
+    in al, 0x60 ; data packet
+     
+    mov ah, byte [mou_cycle]
+    movzx edi, ah
+    mov byte [dapacket + edi], al
+    inc ah
+    cmp ah, 3
+    je .send ; if this is the 3rd
+    ; otherwise save it
+    mov byte [mou_cycle], ah
+    jmp .end
+.send:
+    mov ah, 0
+    mov byte [mou_cycle], ah
+    ; Now we send the dapacket to all hooks
+    ; Save entire dapacket to EAX
+    mov eax, dword [dapacket]
+
+    mov cl, byte 32 ; Loop counter for iteration
+    mov edi, Mouse_Hooks
+.iterate:
+    mov ebx, dword [edi]
+    test ebx, ebx
+    jz .skip
+    pusha
+    ; Struct is stored within the first 24 bits of EAX
+    call ebx
+    popa
+.skip:
+    dec cl
+    jz .end
+    add edi, 4
+    jmp .iterate
+
+.end:
+    mov al, 0x20
+    out 0x20, al
+    mov al, 0x20
+    out 0xA0, al
+.exit:
+    popa
+    iret
+
+
+Mouse_Wait_Write: ; wait to write
+    in al, 0x64
+    test al, 2
+    jnz Mouse_Wait_Write ; if bit not clear, repeat
+    ret
+
+Mouse_Wait_Read: ; wait to read
+    in al, 0x64
+    test al, 1
+    jnz Mouse_Wait_Read ; if bit not set, repeat
+    ret
+
+; BL = byte
+Mouse_Write:
+    call Mouse_Wait_Read
+    mov al, 0xD4
+    out 0x64, al
+    call Mouse_Wait_Read
+    mov al, bl
+    out 0x60, al
+    ret
+
+Mouse_Read:
+    call Mouse_Wait_Write
+    in al, 0x60
+    ret
+
+Mouse_Init:
+    ; Enable the auxiliary mouse device
+    mov al, 0xA8
+    out 0x64, al
+    call Mouse_Wait_Read
+
+    ; Enable interrupts
+    call Mouse_Wait_Read
+    mov al, 0x20
+    out 0x64, al
+    call Mouse_Wait_Write
+    in al, 0x60
+    or al, 2
+    mov ah, al
+    call Mouse_Wait_Read
+    mov al, 0x60
+    out 0x64, al
+    call Mouse_Wait_Read
+    mov al, ah
+    out 0x60, al
+
+    ; Enable data reporting
+    mov bl, 0xF4
+    call Mouse_Write
+    call Mouse_Read
+    
+    ; Set highest sample rate
+    mov al, 0
+    out 0xE8, al
+    call Mouse_Wait_Read
+    call Mouse_Read
+
+    ret

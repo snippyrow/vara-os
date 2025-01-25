@@ -6,6 +6,7 @@ headers:
     start_addr: dd begin
     PID: resd 1
     alive: db 1
+    freeze_events: db 1
 
 begin:
     ; Request all hooks

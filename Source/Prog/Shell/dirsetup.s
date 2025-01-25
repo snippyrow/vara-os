@@ -20,7 +20,7 @@ directorysetup:
     ; Malloc enough space (give about 1KB)
     ; Shared between ALL files
     mov eax, 0x1A
-    mov ebx, 1024
+    mov ebx, 4096
     int 0x80
     ; Assume we have enough at runtime
 
@@ -50,10 +50,22 @@ directorysetup:
     mov esi, edi
     int 0x80
 
+
+    mov eax, 0x18
+    mov ebx, 93
+    mov cl, 8 ; 8 sectors
+    int 0x80
+
+    mov eax, 0x42
+    mov ebx, dword [texteditor + 16] ; cluster start
+    mov ecx, 4000 ; 1000 bytes seems okay
+    mov esi, edi
+    int 0x80
+
     ; Free memory
     mov eax, 0x1B
     mov ebx, edi
-    mov ecx, 1024
+    mov ecx, 4096
     int 0x80
     ret
 
@@ -66,7 +78,7 @@ texteditor:
     dd 0 ; cluster, reserved
     dd 0
     dd 0
-    dd 1024
+    dd 2048
 
 virus:
     db "virus",0,0,0,0,0,0,0

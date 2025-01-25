@@ -77,7 +77,7 @@ process_destroy:
     add eax, process_list
     
     ; eax has process window
-    mov [eax + 6], byte 0x0 ; kill
+    mov byte [eax + 6], byte 0x0 ; kill
     ret
 
 

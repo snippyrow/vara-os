@@ -6,6 +6,7 @@ headers:
     start_addr: dd begin
     PID: resd 1
     alive: db 1
+    freeze_events: db 0
 
 NUM_BLOCKS equ 65535
 BLOCK_SIZE equ 128
@@ -72,6 +73,7 @@ begin:
 
 
     ; Free memory
+    mov edx, (NUM_BLOCKS * 8 * 128) / 1024
     sub edx, ebx
     mov eax, edx
     mov cl, 6
@@ -80,10 +82,13 @@ begin:
     mov eax, suffix
     int 0x70
     
+
     ; Now kill myself
     mov eax, 0x32
     mov ebx, dword [PID]
     int 0x80
+    
+    mov byte [alive], 0 ; set alive flag
 
     ; yield
 .y_loop:

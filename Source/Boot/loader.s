@@ -31,6 +31,9 @@
 [extern Stdout_Int_Handle]
 [extern STDOUT_Hooks]
 [extern mem_table]
+[extern Mouse_Int_Handle]
+[extern Mouse_Hooks]
+[extern Mouse_Init]
 
 Kernel_Start:
     ; IDT Has been defined, populate it with components
@@ -49,6 +52,11 @@ Kernel_Start:
     call IDT_Add
     add esp, 8
 
+    push dword Mouse_Int_Handle
+    push dword 44
+    call IDT_Add
+    add esp, 8
+
     ; Start up core interrupt
     push dword Sys_Int_Handle
     push dword 0x80
@@ -63,16 +71,19 @@ Kernel_Start:
     
     call IDT_Remap
 
-    lidt [IDT_Desc]
-
-    ; Change PIT frequency to 20hz
+    ; Change PIT frequency to 30hz
     mov eax, 30
     call PIT_Config
+    call Mouse_Init
 
 
-    ;mov al, 0b11111010 ; Unmask cascade and KBD
-    mov al, 0b11111000
+    mov al, 0b11111000 ; Unmask PIT, KBD and Cascade
     out 0x21, al
+
+    mov al, 0b11101111 ; Unmask PS/2 mouse
+    out 0xA1, al
+
+    lidt [IDT_Desc]
 
     sti
 
@@ -145,7 +156,7 @@ fat_test_struct:
 
 ; LIST:
 ;   EAX 0x10 = Update screen from work buffer
-;   EAX 0x12 = Draw rectangle (ebx = [x0, y0], ecx = [x1, y1], dl = color)
+;   EAX 0x12 = Draw rectangle (ebx = [y0, x0], ecx = [y1, x1], dl = color)
 ;   EAX 0x13 = Draw default 8x16 character (ebx = [y,x], cl = char, ch = color)
 ;   EAX 0x16 = Get display information (return eax = VESA information vector, return ebx = work buffer start vector, return vector ecx = default font buffer)
 ;   EAX 0x18 = ATA LBA read to vector (ebx = LBA start address, cl = # of sectors to read, edi = buffer start address)
@@ -156,6 +167,8 @@ fat_test_struct:
 ;   EAX 0x21 = Unhook Keyboard (ebx = function ptr)
 ;   EAX 0x24 = Hook PIT (ebx = function ptr)
 ;   EAX 0x25 = Unhook PIT (ebx = function ptr)
+;   EAX 0x26 = Hook Mouse (ebx = function ptr)
+;   EAX 0x27 = Unhook Mouse (ebx = function ptr)
 ;   EAX 0x30 = Spawn Process (ebx = starting addr, return eax = PID (0 if failed))
 ;   EAX 0x31 = Yield Process to kernel
 ;   EAX 0x32 = Process Kill (ebx = PID)
@@ -208,6 +221,11 @@ Sys_Int_Handle:
     je .stdout_hook
     cmp eax, dword 0x36
     je .stdout_unhook
+
+    cmp eax, dword 0x26
+    je .mouse_hook
+    cmp eax, dword 0x27
+    je .mouse_unhook
 
     cmp eax, dword 0x40
     je .fat_mk
@@ -332,6 +350,7 @@ Sys_Int_Handle:
     sti
     iret
 
+; STDOUT hooks
 .stdout_hook:
     pusha
     mov cl, byte 0 ; Loop counter for iteration
@@ -373,6 +392,51 @@ Sys_Int_Handle:
     add edi, 4
     jmp .iterate_unstd
 .end_unstd:
+    popa
+    sti
+    iret
+
+; Mouse hooks
+.mouse_hook:
+    pusha
+    mov cl, byte 0 ; Loop counter for iteration
+    mov edi, Mouse_Hooks
+.iterate_mou:
+    cmp cl, byte 64
+    je .end_mou
+    mov edx, dword [edi]
+    test edx, edx
+    jnz .skip_mou
+    ; Found a function ptr that is 0, update
+    mov dword [edi], ebx
+    jmp .end_mou
+.skip_mou:
+    inc cl
+    add edi, 4
+    jmp .iterate_mou
+.end_mou:
+    popa
+    sti
+    iret
+
+.mouse_unhook:
+    pusha
+    mov cl, byte 0 ; Loop counter for iteration
+    mov edi, Mouse_Hooks
+.iterate_unmou:
+    cmp cl, byte 64
+    je .end_unmou
+    mov edx, dword [edi]
+    cmp edx, ebx
+    jne .skip_unmou
+    ; Skip if not equal to the function ptr, otherwise set it
+    mov dword [edi], dword 0x0
+    jmp .end_unmou
+.skip_unmou:
+    inc cl
+    add edi, 4
+    jmp .iterate_unmou
+.end_unmou:
     popa
     sti
     iret

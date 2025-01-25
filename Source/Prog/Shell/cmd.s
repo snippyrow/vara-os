@@ -450,7 +450,11 @@ run:
     int 0x80
     ; Return EAX is the PID
     ; Pass in the PID
-    mov dword [edi + 8], eax
+    mov dword [edx + 8], eax
+    
+    ; Pass the current shell directory to the ENV
+    mov eax, dword [shell_dir]
+    mov dword [edx + 14], 2
 
     ; Free memory
     pop ebx
@@ -460,12 +464,22 @@ run:
 
     ; Now important, de-register the keyboard from the shell. When yielded back, it will check and re-register if not already done so.
     mov byte [kbd_enabled], 0
-    mov eax, edi
+    mov eax, [edi] ; where the program will load + 12
     add eax, 12 ; ptr to alive header flag
-    mov dword [program_running], edi ; ptr
+    mov dword [program_running], eax ; ptr
     mov eax, 0x21
     mov ebx, shell_kbd_hook
     int 0x80
+
+    ; If the executable contains a GUI, as per flags, turn off all shell events
+    cmp byte [edi + 13], 0
+    je .end
+    mov byte [gui_enabled], 0
+    mov eax, 0x25
+    mov ebx, cur_hook
+    int 0x80
+
+
 
     jmp .end ; will be yielded automatically
     

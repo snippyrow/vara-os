@@ -19,6 +19,7 @@ asm:
 	nasm -felf32 "Source/Prog/Sys/bootmenu.s" -f bin -o "Binaries/bootmenu.bin"
 	nasm -felf32 "Source/Prog/Virus/virus.s" -f bin -o "Binaries/virus.bin"
 	nasm -felf32 "Source/Prog/Usage/memusage.s" -f bin -o "Binaries/memusage.bin"
+	nasm -felf32 "Source/Prog/Textedit/editor.s" -f bin -o "Binaries/texteditor_v1.bin"
 # nasm "Source/Asm/proc.s" -f elf -o "Binaries/proc.o"
 # /usr/local/i386elfgcc/bin/i386-elf-gcc $(CFLAGS) -c Source/Utilities/Util.cpp -o Binaries/util.o
 
@@ -34,6 +35,7 @@ run:
 	dd if=Binaries/bootmenu.bin of=main.img bs=512 seek=70
 	dd if=Binaries/virus.bin of=main.img bs=512 seek=90
 	dd if=Binaries/memusage.bin of=main.img bs=512 seek=91
+	dd if=Binaries/texteditor_v1.bin of=main.img bs=512 seek=93
 	dd if=/dev/zero bs=1M count=30 >> main.img
 # append 7100000 zeroes to convert to vdi
 

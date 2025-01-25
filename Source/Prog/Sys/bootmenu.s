@@ -6,18 +6,20 @@ headers:
     start_addr: dd boot_main
     PID: resd 1
     alive: db 1
+    freeze_events: db 0
 
 ; error: only prints once, cannot be executed multiple times, putting a jmp $ before killing itself does nothing somehow
 boot_main:
     mov eax, tesstr
     int 0x70
+    
     ; Now kill myself
     mov eax, 0x32
     mov ebx, dword [PID]
     int 0x80
 
     mov byte [alive], 0 ; set alive flag
-
+    
     ; yield
 .y_loop:
     mov eax, 0x31

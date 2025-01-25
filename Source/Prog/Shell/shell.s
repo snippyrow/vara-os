@@ -130,6 +130,16 @@ main:
     mov eax, 0x12
     int 0x80
 
+    ; Allocate space for video memory
+    movzx eax, word [win_width]
+    movzx ebx, word [win_height]
+    mul ebx ; width x height
+    shl eax, 2 ; x 4 (char, background, foreground, visible)
+    mov ebx, eax
+    mov eax, 0x1A
+    int 0x80
+    mov dword [video_memory], eax
+
     ; Write intro spash
     mov eax, intro
     call tty_printstr
@@ -151,12 +161,20 @@ main:
     jnz .y_loop
 
     cmp byte [kbd_enabled], 0 ; make sure to not reclaim every cycle
-    jne .y_loop
-
+    jne .continue
+    
     mov eax, 0x20
     mov ebx, shell_kbd_hook
     int 0x80
     mov byte [kbd_enabled], 1
+.continue:
+    cmp byte [gui_enabled], 0
+    jne .y_loop
+    
+    mov eax, 0x24
+    mov ebx, cur_hook
+    int 0x80
+    mov byte [gui_enabled], 1
 
     jmp .y_loop
 
@@ -550,10 +568,15 @@ shell_prompt:
     db "$ ",0
     resb 16 ; padding
 shell_dir: dd 0 ; root
-kbd_enabled: resb 1 ; is the keyboard registered?
-program_running: resd 1 ; ptr to whether the program is alive (for reclaiming the keyboard)
+kbd_enabled: db 1 ; is the keyboard registered?
+gui_enabled: db 1 ; blinking cursor
+program_running: dd fakeflags ; ptr to whether the program is alive (for reclaiming the keyboard) (for now keep it like that)
 
 intro: db "Vara OS devshell loaded. Type 'help' for information.",10,0
+
+fakeflags: db 1
+
+video_memory: resd 1 ; ptr to video memory
 
 video_info:
     work_start: resd 1

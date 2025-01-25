@@ -537,7 +537,9 @@ fat_read:
 
 ; EAX = raw file begin, EDI = ptr to buffer, ECX = size of buffer
 ; Be able to allocate and deallocate clusters
+file_cluster: resd 1
 fat_write:
+    mov dword [file_cluster], eax
     mov ebp, edi ; back-up
     cld ; incrementing
     mov esi, ebp
@@ -566,18 +568,20 @@ fat_write:
     je .expand
     ; If not, simply load next
     mov bx, 1024
+    add ebp, 1024
     mov esi, ebp
     mov edi, page_raw
+
+    mov dword [file_cluster], eax
 
     dec ecx
     jz .end
     jmp .loop
 .expand:
     ; Same procedure as load new, but instead generate a new location
-    push eax
     call _fat_scan
     mov ebx, eax
-    pop eax
+    mov eax, dword [file_cluster]
     call _fat_update ; update current file to link to the next cluster
     mov eax, ebx
     mov ebx, EOC
@@ -592,8 +596,11 @@ fat_write:
     pop eax
 
     mov bx, 1024
+    add ebp, 1024
     mov esi, ebp
     mov edi, page_raw
+
+    mov dword [file_cluster], eax
 
     jmp .loop
 
