@@ -39,7 +39,7 @@ screen_clear:
     shl edx, byte 16
     mov ecx, edx
     mov cx, word [win_width]
-    mov dl, byte [shell_bg]
+    mov dl, byte [background]
     mov eax, 0x12
     int 0x80
 
@@ -160,6 +160,7 @@ win_prompt:
 
     mov dword [kbd_switch], prompt_kbd
     mov dword [enter_switch], prompt_submit
+    mov dword [back_switch], prompt_back
 .end:
     ret
 
@@ -176,6 +177,13 @@ prompt_kbd:
     shl eax, 3 ; x8 for pixel position X
     mov ecx, eax
     mov eax, dword [textbox_corner]
+
+    ; If CX is too large, skip rendering the character
+    mov bx, word [popup_width]
+    sub bx, 44 ; (margins + 1/2 char)
+    cmp cx, bx
+    jae .end
+
     add ax, cx ; add the X coordinate
     add eax, 0x00020002 ; add 2 to Y/X coord
     mov cl, dl ; move character
@@ -190,12 +198,15 @@ prompt_kbd:
 
 .end:
     ret
+
 prompt_submit:
     mov ebx, dword [prompt_call]
     test ebx, ebx
     jz .end
     mov eax, prompt_buffer
     call ebx
+    test eax, eax
+    jz .declined
 .end:
     ; Zero out buffer
     ; Deregister prompt switches and hand back to main editor
@@ -203,6 +214,7 @@ prompt_submit:
     mov al, 0
     mov ecx, 50
     call memset
+    
     ; Destroy window
     mov ebx, dword [popup_corner]
     mov ecx, ebx
@@ -210,22 +222,61 @@ prompt_submit:
     add ecx, edx
     add ecx, shadow_offset
     add ecx, (prompt_height + shadow_offset) << 16 ; add height
-    mov dl, 0
+    mov dl, byte [background]
     mov eax, 0x12
     int 0x80
-
+    
     mov dword [prompt_call], 0
-    mov dword [kbd_switch], gui_input
-    mov dword [enter_switch], gui_input
-    mov dword [back_switch], gui_input
+    mov dword [kbd_switch], page_input
+    mov dword [enter_switch], page_nl
+    mov dword [back_switch], page_back
     
     mov eax, 0x10
     int 0x80
+    ret
+.declined:
+    ret
+
+; backspace
+prompt_back:
+    mov eax, prompt_buffer
+    call strlen
+    test eax, eax
+    jz .nospace
+    dec eax
+    mov byte [prompt_buffer + eax], 0
+
+    ; Black out textbox
+    shl eax, 3 ; x8 for pixel position X
+    mov ecx, eax
+
+    ; If CX is too large, skip rendering a backspace
+    mov bx, word [popup_width]
+    sub bx, 44 ; (margins + 1/2 char)
+    cmp cx, bx
+    jae .nospace
+
+    mov eax, dword [textbox_corner]
+    add ax, cx ; add the X coordinate
+    add eax, 0x00020002 ; add 2 to Y/X coord
+    mov ebx, eax ; move text position
+    mov ecx, ebx
+    add ecx, 0x00100008
+    mov dl, 0xf
+    mov eax, 0x12
+    int 0x80
+
+    ; Update screen
+    mov eax, 0x10
+    int 0x80
+
+.nospace:
     ret
 
 
 ; EDI = string, EDX = [y, x], CL = text color
 win_draw_str:
+    pusha
     mov ebx, edx
     mov ch, cl
     mov eax, 0x13 ; opcode
@@ -238,6 +289,7 @@ win_draw_str:
     inc edi
     jmp .loop
 .end:
+    popa
     ret
 
 video_info:
@@ -247,7 +299,6 @@ video_info:
     win_width: resw 1
     win_height: resw 1
 
-shell_bg: db 0
 text_margin: dw 6 ; in pixels
 
 cur_column: resw 1

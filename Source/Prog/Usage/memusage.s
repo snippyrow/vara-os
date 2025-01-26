@@ -7,6 +7,7 @@ headers:
     PID: resd 1
     alive: db 1
     freeze_events: db 0
+    running_directory: resd 1
 
 NUM_BLOCKS equ 65535
 BLOCK_SIZE equ 128
@@ -54,7 +55,7 @@ begin:
     int 0x70
     ; print total memory
 
-    mov eax, (NUM_BLOCKS * 8 * 128) / 1024
+    mov eax, (NUM_BLOCKS * 8 * BLOCK_SIZE) / 1024
     mov edx, eax
     mov cl, 6
     call hexstr
@@ -73,7 +74,7 @@ begin:
 
 
     ; Free memory
-    mov edx, (NUM_BLOCKS * 8 * 128) / 1024
+    mov edx, (NUM_BLOCKS * 8 * BLOCK_SIZE) / 1024
     sub edx, ebx
     mov eax, edx
     mov cl, 6

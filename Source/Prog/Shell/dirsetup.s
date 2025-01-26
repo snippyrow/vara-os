@@ -53,12 +53,12 @@ directorysetup:
 
     mov eax, 0x18
     mov ebx, 93
-    mov cl, 8 ; 8 sectors
+    mov cl, 12 ; 8 sectors
     int 0x80
 
     mov eax, 0x42
     mov ebx, dword [texteditor + 16] ; cluster start
-    mov ecx, 4000 ; 1000 bytes seems okay
+    mov ecx, 6000 ; 1000 bytes seems okay
     mov esi, edi
     int 0x80
 
@@ -78,7 +78,7 @@ texteditor:
     dd 0 ; cluster, reserved
     dd 0
     dd 0
-    dd 2048
+    dd 4192
 
 virus:
     db "virus",0,0,0,0,0,0,0

@@ -35,66 +35,60 @@ memcpy:
     ret
 
 ; EAX is the uint32, return EAX is ptr for string, 0 if failed
-; CL is the mandated number of digits
-
-
-tstr:
+tmpstr_rev: ; reversed
     resb 32
-tstr2:
+tmpstr: ; modified (non-reversed)
     resb 32
-hexstr:
-    mov edx, eax
-    mov edi, tstr2 ; new ptr
-    push edi
+intstr:
+    push ebx
     push ecx
+    push edx
+    push edi
+    push esi
+    test eax, eax
+    jz .iszero
+    mov ebx, 10 ; divisor
+    mov edi, tmpstr_rev
+    xor ecx, ecx ; length counter
 .loop:
-    test edx, edx
-    jz .fill ; if the number is over
-    mov eax, edx
-    mov ch, byte '0'
-    and eax, dword 0xF
-    cmp al, 9
-    jbe .noadd
-    ; Add
-    mov ch, byte 'A'
-    sub al, 10
-.noadd:
-    add ch, al
-    mov byte [edi], ch
-    shr edx, 4
+    test eax, eax
+    jz .end ; if there is no more number left
+    ; Number in EAX
+    xor edx, edx ; clear remainder
+    div ebx ; / 10; mod 10
+    ; Mod number is in EDX
+    add dl, byte '0' ; since mod 10 can never be more than dl
+    mov byte [edi], dl
     inc edi
-    dec cl
+    inc ecx
     jmp .loop
-.fill:
-    test cl, cl
-    jz .end
-    dec cl
-    mov byte [edi], byte '0'
-    inc edi
-    jmp .fill
-
 .end:
-    mov byte [edi], 0
+    ; Reverse copy string
+    mov byte [tmpstr + ecx], 0 ; insert EOF at appropriate length
+    mov esi, edi
+    dec esi
+    mov edi, tmpstr
+.rev_loop:
+    mov al, byte [esi]
+    mov byte [edi], al
+    dec esi
+    inc edi
+    dec ecx
+    jnz .rev_loop
+    jmp .endf
+.iszero:
+    mov byte [tmpstr], '0'
+    mov byte [tmpstr + 1], 0
+.endf:
+    mov eax, tmpstr
+    pop esi
+    pop edi
+    pop edx
     pop ecx
-    pop eax ; start vector
-
-    ; Reverse string
-    ; Loop until CL is 0
-    ; DL is incrementing counter
-    and ecx, 0x000000FF
-    xor edx, edx
-.l:
-    test cl, cl
-    jz .e
-    mov bl, byte [tstr2 + ecx - 1]
-    mov byte [tstr + edx], bl
-    dec cl
-    inc dl
-    jmp .l
-.e:
-    mov byte [tstr + edx], 0
-    mov eax, tstr
+    pop ebx
     ret
+
+
 
 ; EDI = destination ptr, al = replace byte, ECX = # of bytes
 memset:

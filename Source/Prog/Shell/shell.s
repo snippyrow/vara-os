@@ -167,6 +167,14 @@ main:
     mov ebx, shell_kbd_hook
     int 0x80
     mov byte [kbd_enabled], 1
+
+    ; Re-print the prompt
+    mov al, 10
+    mov ah, 0
+    mov bl, 0
+    call tty_putchar ; NL
+    mov eax, shell_prompt
+    call tty_printstr
 .continue:
     cmp byte [gui_enabled], 0
     jne .y_loop

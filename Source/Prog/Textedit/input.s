@@ -30,6 +30,11 @@ keyboard_handler:
     cmp al, byte 0xB6
     je .unshift
 
+    cmp al, byte 0x1D
+    je .ctrl
+    cmp al, byte 0x9D
+    je .unctrl
+
     ; Ignore non-printable scancodes
     cmp al, 0x01
     jb .end
@@ -81,9 +86,72 @@ keyboard_handler:
 .unshift:
     mov byte [upper], byte 0x0
     ret
+.ctrl:
+    mov byte [ctrl], 1
+    ret
+.unctrl:
+    mov byte [ctrl], 0
+    ret
 .end:
+    ret
+    
+
+; AL = character input
+page_input:
+    ; Compute the position of the new character to be put down based on cursor X/Y
+    ; Advance the line if necessary
+    ; Add tabs/indents, newlines
+    ; File writing
+    ; Check if it is a control character
+    mov bl, byte [ctrl]
+    test bl, bl
+    jnz .isctrl
+.resume:
+    ; Add character to the file
+    mov edi, dword [file_cursor]
+    add edi, dword [file_entry]
+    mov byte [edi], al
+    inc dword [file_cursor]
+
+    mov cl, al
+    mov eax, 0x13
+    mov bx, word [file_char_y]
+    shl bx, 4 ; abs position
+    add bx, 25
+    shl ebx, 16
+    mov bx, word [file_char_x]
+    shl bx, 3
+    add bx, (8 * 3) + 15
+    mov ch, 0xf
+    inc word [file_char_x]
+    int 0x80
+
+    mov eax, 0x10
+    int 0x80
+
+    add bx, 24 ; give it more of a margin
+    cmp bx, word [win_width]
+    jae .nextln
+    ret
+.nextln:
+    mov word [file_char_x], 0
+    inc word [file_char_y]
+    ret
+.isctrl:
+    cmp al, 'x'
+    je .shouldkill
+    cmp al, 'X'
+    je .shouldkill
+    cmp al, 's'
+    je page_save
+    cmp al, 'S'
+    je page_save
+    jmp .resume
+.shouldkill:
+    mov byte [alive], 0
     ret
 
 keymap: db "??1234567890-=??qwertyuiop[]E?asdfghjkl",59,39,96,"A?zxcvbnm,./??? "
 keymap_shift: db "??!@#$%^&*()_+??QWERTYUIOP{}??ASDFGHJKL:",34,"~?",92,"ZXCVBNM<>???? "
 upper: db 0
+ctrl: db 0

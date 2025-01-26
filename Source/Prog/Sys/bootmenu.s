@@ -7,6 +7,7 @@ headers:
     PID: resd 1
     alive: db 1
     freeze_events: db 0
+    running_directory: resd 1
 
 ; error: only prints once, cannot be executed multiple times, putting a jmp $ before killing itself does nothing somehow
 boot_main:

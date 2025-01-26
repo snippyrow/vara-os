@@ -524,6 +524,8 @@ fat_read:
     add ebp, 1024
     mov eax, edx
     call _fat_next
+    cmp eax, EOC
+    je .end ; if end of file
     mov edx, eax
     shl eax, 1
     add eax, OFFSET + (NUM_SBLOCK * 32) + NUM_SBLOCK + 1

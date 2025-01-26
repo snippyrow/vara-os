@@ -24,6 +24,7 @@
 ; Linked kernel starts here.
 
 VBE_RES equ 0x107 ; 1280×1024
+SCREEN_WIDTH equ 1280
 V_WORK_BUFF equ 0x100000
 V_FNT_BUFF equ 0x7E00 + (40 * 512)
 
@@ -137,7 +138,7 @@ V_DrawRect:
 
     ; Calculate pixel position in work buffer
     mov eax, ebp             ; Get current y position
-    imul eax, 1280           ; Multiply y by screen width
+    imul eax, SCREEN_WIDTH   ; Multiply y by screen width
     add eax, ecx             ; Add x position
     mov byte [V_WORK_BUFF + eax], bl ; Write pixel color
 
@@ -175,6 +176,7 @@ V_DrawChar:
     mov eax, ebp
     xor ebx, ebx
     movzx ebx, word [V_WIDTH] ; must be a constant for some reason, otherwise bugs out Y coordinates
+    mov bp, word [V_WIDTH]
     mul ebx
     add eax, esi
 
@@ -198,7 +200,7 @@ V_DrawChar:
     xor ebx, ebx
     inc cl
     inc edi
-    add eax, dword 1280
+    add eax, ebp
     cmp cl, byte 16
     je .end
     jmp .loop_y
