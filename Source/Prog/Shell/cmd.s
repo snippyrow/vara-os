@@ -56,6 +56,8 @@ help_handle:
     test bl, bl ; test first character
     jz .end ; If last command
     ; Print
+    mov bl, 0xf
+    mov bh, 0
     call tty_printstr
     push eax
     mov al, 10
@@ -70,6 +72,92 @@ help_handle:
 clear_handle:
     call kbd_wipe
     call tty_clear
+    ret
+
+; Core function to execute a file as a process
+; EDI = file struct ptr
+; Called from shell.s, when the list of built-in commands is exhuasted
+; Load in the working directory from the shell dir
+exec:
+    ; Allocate a spot for it, spawn a process and run
+    ; Find file size, allocate and run
+    mov ebx, dword [edi + 28] ; size
+    shr ebx, 10 ; / 1024
+    inc ebx ; add 1
+    mov edx, ebx ; total # of clusters to read
+    
+    mov eax, 0x1A
+    mov ebx, 1024
+    int 0x80 ; malloc
+    test eax, eax
+    jz .oom ; no memory
+    push eax
+
+    ; read first cluster of executable file, then read the headers for that file
+    mov ebp, edi ; move the FAT object here
+    mov edi, eax
+    mov eax, 0x41
+    mov ebx, dword [ebp + 16] ; get cluster for file
+    mov ecx, 1
+    int 0x80 ; read file
+
+    ; Read file in its entierety again
+    push edi
+    mov ecx, edx
+    mov edx, dword [edi]
+    mov edi, edx ; origin address
+    mov eax, 0x41
+    mov ebx, dword [ebp + 16] ; get cluster for file
+    int 0x80 ; read file
+    pop edi ; header
+
+    ; Spawn process
+    mov eax, 0x30
+    mov ebx, dword [edi + 4] ; start addr
+    int 0x80
+    ; Return EAX is the PID
+    ; Pass in the PID
+    mov dword [edx + 8], eax
+    
+    ; Pass the current shell directory to the ENV
+    mov eax, dword [shell_dir]
+    mov dword [edx + 14], eax
+
+    ; Pass the shell prompt as the arguments
+    mov dword [edx + 18], kbd_buffer
+
+    ; Free memory
+    pop ebx
+    mov eax, 0x1B
+    mov ecx, 1024
+    int 0x80
+
+    ; Now important, de-register the keyboard from the shell. When yielded back, it will check and re-register if not already done so.
+    mov byte [kbd_enabled], 0
+    mov eax, [edi] ; where the program will load + 12
+    add eax, 12 ; ptr to alive header flag
+    mov dword [program_running], eax ; ptr
+    mov eax, 0x21
+    mov ebx, shell_kbd_hook
+    int 0x80
+
+    ; If the executable contains a GUI, as per flags, turn off all shell events
+    cmp byte [edi + 13], 0
+    je .end
+    mov byte [gui_enabled], 0
+    mov eax, 0x25
+    mov ebx, cur_hook
+    int 0x80
+
+    jmp .end ; will be yielded automatically
+
+.oom:
+    mov eax, oom_err
+    mov bl, 0xf
+    mov bh, 0
+    call tty_printstr
+.end:
+    call kbd_wipe
     ret
 
 ; List all files in current directory
@@ -129,11 +217,16 @@ f_list_handle:
 
     ; Print object name
     mov eax, f_name
+    mov bl, 0xf
+    mov bh, 0
     call tty_printstr
     mov al, byte '.'
     mov ah, 0xf
+    mov bl, 0
     call tty_putchar
     mov eax, f_ext
+    mov bl, 0xf
+    mov bh, 0
     call tty_printstr
 
     jmp .nf
@@ -147,11 +240,15 @@ f_list_handle:
 
     ; Print object name
     mov eax, f_name
+    mov bl, 0xf
+    mov bh, 0
     call tty_printstr
     jmp .nf
 
 .isnav:
     mov eax, nav_name
+    mov bl, 0xf
+    mov bh, 0
     call tty_printstr
     jmp .nf
     
@@ -169,6 +266,8 @@ f_list_handle:
 .oom:
     pop eax
     mov eax, oom_err
+    mov bl, 0xf
+    mov bh, 0
     call tty_printstr
     call kbd_wipe
     ret
@@ -215,11 +314,15 @@ f_mkdir:
 
 .oversize:
     mov eax, oversize_err
+    mov bl, 0xf
+    mov bh, 0
     call tty_printstr
     call kbd_wipe
     ret
 .oom:
     mov eax, oom_err
+    mov bl, 0xf
+    mov bh, 0
     call tty_printstr
     call kbd_wipe
     ret
@@ -293,10 +396,13 @@ f_cd:
 
 .isnav:
     ; Just jump to the first thing in the list
+    cmp byte [edi + 15], 0x80
+    jne .end
     mov eax, dword [edi + 16]
     mov dword [shell_dir], eax
 
     mov eax, edi ; ptr to string name
+    mov byte [edi + 12], 0
     mov ebp, edi ; backup
     call strlen
     mov ecx, eax ; move length
@@ -314,6 +420,8 @@ f_cd:
 
 .oom:
     mov eax, oom_err
+    mov bl, 0xf
+    mov bh, 0
     call tty_printstr
 .end:
     ; free the memory
@@ -454,7 +562,10 @@ run:
     
     ; Pass the current shell directory to the ENV
     mov eax, dword [shell_dir]
-    mov dword [edx + 14], 2
+    mov dword [edx + 14], eax
+
+    ; Pass the shell prompt as the arguments
+    mov dword [edx + 18], kbd_buffer
 
     ; Free memory
     pop ebx
@@ -491,9 +602,11 @@ run:
 
 .oom:
     mov eax, oom_err
+    mov bl, 0xf
+    mov bh, 0
     call tty_printstr
 .end:
-    ; free the memory
+    ; free the memory from very first fs scan
     pop ebx
     mov eax, 0x1B
     mov ecx, 1024 * 2

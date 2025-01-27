@@ -3,7 +3,7 @@
 strlen:
     push ebx
     push ecx
-    mov ebx, dword 0 ; loop counter for length
+    xor ebx, ebx ; loop counter for length
 .loop:
     mov cl, byte [eax]
     test cl, cl
@@ -168,6 +168,8 @@ hexstr:
 
 ; EDI = destination, ESI = source, ECX = # of bytes
 memcpy:
+    test ecx, ecx
+    jz .failed ; if ECX = 0, it will roll over and thing will go BAD
     push esi
     push edi
     push ecx
@@ -179,4 +181,5 @@ memcpy:
     pop ecx
     pop edi
     pop esi
+.failed:
     ret

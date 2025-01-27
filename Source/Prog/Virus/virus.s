@@ -8,6 +8,7 @@ headers:
     alive: db 1
     freeze_events: db 1
     running_directory: resd 1
+    args: resd 1
 
 begin:
     ; Request all hooks

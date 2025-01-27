@@ -123,11 +123,12 @@ page_input:
     shl bx, 3
     add bx, (8 * 3) + 15
     mov ch, 0xf
-    inc word [file_char_x]
     int 0x80
 
     mov eax, 0x10
     int 0x80
+
+    inc word [file_char_x]
 
     add bx, 24 ; give it more of a margin
     cmp bx, word [win_width]

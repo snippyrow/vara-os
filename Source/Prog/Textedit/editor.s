@@ -1,21 +1,23 @@
 [bits 32]
-[org 0x300000] ; keep clear of stack!
+[org 300000] ; keep clear of stack!
 
 ; TODO: backspace, tabs, cursor, opening old files
 
 ; basically ENV variables
 headers:
-    origin_addr: dd 0x300000
+    origin_addr: dd 300000
     start_addr: dd boot_main
     PID: resd 1
     alive: db 1
     freeze_events: db 1 ; optional, freeze shell events such as a blinking cursor
     running_directory: resd 1
+    args: resd 1
 
 kbd_handlers:
     resd 4
 
 background: db 0xDE
+background_highlight: db 0xAE
 file_entry: resd 1 ; ptr to the file
 file_cursor: resd 1 ; position of the ptr (end)
 file_cluster_begin: resd 1 ; cluster start of raw file being edited
@@ -32,8 +34,8 @@ boot_main:
     je .boot_resume
     mov eax, booterr
     int 0x70
-    jmp kill
-.boot_resume
+    jmp failedboot
+.boot_resume:
     ; TODO:
     ; clear screen, draw a gui and do a mouse
     call gui_init
@@ -266,7 +268,7 @@ page_nl:
     ret
 
 page_back:
-    ret ; for now
+    ;ret ; for now
     cmp word [file_cursor], 0
     je .end ; if nothing left
 
@@ -279,11 +281,34 @@ page_back:
     cmp word [file_char_x], 0
     je .prevln ; if we need to go UP a line
 
+    dec word [file_char_x]
+    jmp .continue
+.prevln:
+    cmp word [file_char_y], 0
+    je .end
     ; Calculate max column
     mov ax, word [win_width]
-    sub ax, 
+    sub ax, (8 * 3) + 15
+    shr ax, 3 ; / 8
+    dec word [file_char_y]
+    mov word [file_char_x], ax
+.continue:
+    ; Black out character
+    mov bx, word [file_char_y]
+    shl bx, 4
+    add bx, 25
+    shl ebx, 16
+    mov bx, word [file_char_x]
+    shl bx, 3
+    add bx, (8 * 3) + 15
+    mov eax, 0x12
+    mov ecx, ebx
+    add ecx, 0x00100008
+    mov dl, byte [background_highlight]
+    int 0x80
 
-.prevln:
+    mov eax, 0x10
+    int 0x80
 
 .end:
     ret
@@ -307,7 +332,7 @@ endian: db "/)",0
 test2: db "Create or open file",0
 tip1: db "[ESC] to exit",0
 bottomtext: db "^X to close ^S to save ^N to make new file",0
-booterr: db "ERROR: File integrity check failed.",0
+booterr: db "ERROR: File integrity check failed.. Try again later.",0
 
 ; cannot be called from inside an interrupt!
 kill:
@@ -324,7 +349,7 @@ kill:
     ; Update VGA
     mov eax, 0x10
     int 0x80
-
+failedboot:
     ; De-register keyboard handler
     mov eax, 0x21
     mov ebx, keyboard_handler

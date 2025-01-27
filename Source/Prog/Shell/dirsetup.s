@@ -16,6 +16,10 @@ directorysetup:
     mov edi, memusage
     int 0x80
 
+    mov eax, 0x40
+    mov edi, sysfetch
+    int 0x80
+
     ; Append code to virus file
     ; Malloc enough space (give about 1KB)
     ; Shared between ALL files
@@ -53,14 +57,27 @@ directorysetup:
 
     mov eax, 0x18
     mov ebx, 93
-    mov cl, 12 ; 8 sectors
+    mov cl, 8 ; 8 sectors
     int 0x80
 
     mov eax, 0x42
     mov ebx, dword [texteditor + 16] ; cluster start
-    mov ecx, 6000 ; 1000 bytes seems okay
+    mov ecx, 4096 ; 1000 bytes seems okay
     mov esi, edi
     int 0x80
+
+    ; Now copy the sysfetch program
+    mov eax, 0x18
+    mov ebx, 101
+    mov cl, 2
+    int 0x80
+
+    mov eax, 0x42
+    mov ebx, dword [sysfetch + 16] ; cluster start
+    mov ecx, 1000 ; 1000 bytes seems okay
+    mov esi, edi
+    int 0x80
+
 
     ; Free memory
     mov eax, 0x1B
@@ -78,7 +95,7 @@ texteditor:
     dd 0 ; cluster, reserved
     dd 0
     dd 0
-    dd 4192
+    dd 4096
 
 virus:
     db "virus",0,0,0,0,0,0,0
@@ -97,5 +114,15 @@ memusage:
     dd 0
     dd 0
     dd 512
+
+sysfetch:
+    db "sysfetch",0,0,0,0
+    db "run"
+    db 1
+    dd 0 ; cluster, reserved
+    dd 0
+    dd 0
+    dd 1000
+    
 
 home: resd 1

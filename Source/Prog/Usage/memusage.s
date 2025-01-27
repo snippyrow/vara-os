@@ -8,6 +8,7 @@ headers:
     alive: db 1
     freeze_events: db 0
     running_directory: resd 1
+    args: resd 1
 
 NUM_BLOCKS equ 65535
 BLOCK_SIZE equ 128
@@ -52,6 +53,8 @@ begin:
     ; Print used memory
     ; Convert used to number
     mov eax, guistr
+    mov bl, 0xf
+    mov bh, 0
     int 0x70
     ; print total memory
 
@@ -59,6 +62,8 @@ begin:
     mov edx, eax
     mov cl, 6
     call hexstr
+    mov bl, 0xf
+    mov bh, 0
     int 0x70
     mov eax, suffix
     int 0x70
@@ -68,8 +73,12 @@ begin:
     mov ebx, eax
     mov cl, 6
     call hexstr
+    mov bl, 0xf
+    mov bh, 0
     int 0x70
     mov eax, suffix
+    mov bl, 0xf
+    mov bh, 0
     int 0x70
 
 
@@ -79,8 +88,12 @@ begin:
     mov eax, edx
     mov cl, 6
     call hexstr
+    mov bl, 0xf
+    mov bh, 0
     int 0x70
     mov eax, suffix
+    mov bl, 0xf
+    mov bh, 0
     int 0x70
     
 

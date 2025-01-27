@@ -239,12 +239,12 @@ Stdout_Int_Handle:
 .iterate:
     cmp cl, byte 64
     je .end
-    mov ebx, dword [edi]
-    test ebx, ebx
+    mov edx, dword [edi]
+    test edx, edx
     jz .skip
     pusha
-    ; scancode is already in AL, and is restored after the function
-    call ebx
+    ; Primary object is in EAX, and pass in EBX also.
+    call edx
     popa
 .skip:
     inc cl

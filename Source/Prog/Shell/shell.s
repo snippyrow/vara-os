@@ -23,13 +23,15 @@ boot_struct:
     dd 1024
 
 tut_dir:
-    db "home",0,0,0,0,0,0,0,0
+    db "bin",0,0,0,0,0,0,0,0,0
     db "..."
     db 2
     dd 0 ; cluster, reserved
     dd 0
     dd 0
     dd 0
+
+binaries: resd 1
 
 file_ex:
     db "Hello, world! How are :)"
@@ -87,6 +89,7 @@ main:
 
     ; Inserted here, but works. Used for creating directories
     mov eax, dword [tut_dir + 16] ; get modified cluster
+    mov dword [binaries], eax ; directory containing runnable binaries as commands
     call directorysetup
 
     ; Request critical video information
@@ -142,6 +145,8 @@ main:
 
     ; Write intro spash
     mov eax, intro
+    mov bl, 0xf
+    mov bh, 0
     call tty_printstr
     mov eax, shell_prompt
     call tty_printstr
@@ -173,6 +178,8 @@ main:
     mov ah, 0
     mov bl, 0
     call tty_putchar ; NL
+    mov bl, 0xf
+    mov bh, 0
     mov eax, shell_prompt
     call tty_printstr
 .continue:
@@ -324,14 +331,54 @@ shell_enter:
     pop ecx
     call ebx ; call loaded function, returns here
     mov al, 10
+    mov ah, 0
+    mov bl, 0
     call tty_putchar
+    mov bl, 0xf
+    mov bh, 0
     mov eax, shell_prompt
     call tty_printstr
     ret
 .end:
     pop ecx
+    ; All commands were exhausted, scan /bin/ for a workable program
+
+    ; Allocate space for 32 objects MAX
+    mov eax, 0x1A
+    mov ebx, 1024
+    int 0x80
+    test eax, eax
+    jz none_default ; if no memory
+
+    mov edi, eax
+    mov eax, 0x41
+    mov ebx, dword [binaries]
+    mov ecx, 1
+    int 0x80 ; call
+
+    ; Scan files for a match with kbd buffer (space was set to EOF)
+    mov cx, 32 ; counter
+.scanf:
+    cmp byte [edi + 15], 1 ; if a file
+    jne .nomatch
+
+    mov eax, kbd_buffer
+    mov byte [edi + 12], 0 ; end last char with EOF
+    mov ebx, edi
+    call strcmp
+    test eax, eax
+    jnz .foundbin ; if names match
+    ; If names do not match
+.nomatch:
+    add edi, 32
+    dec cx
+    jnz .scanf
+.endall:
     jmp none_default
     ret
+; execute process as found in EDI
+.foundbin:
+    jmp exec
 
 shell_back:
     ; Remove the top character from the keyboard buffer, then draw over the existing character
@@ -439,16 +486,18 @@ tty_putchar:
     popa
     ret
 
-; Fast wrapper for printing to screen (EAX = string ptr), only plain colors
+; Fast wrapper for printing to screen (EAX = string ptr)
+; BL = foreground
+; BH = background
 tty_printstr:
     pusha
     mov ecx, eax
+    mov ah, bl
+    mov bl, bh
 .loop:
     mov al, byte [ecx]
     test al, al
     jz .end
-    mov ah, byte 0xf
-    mov bl, byte 0
     call tty_putchar
     inc ecx
     jmp .loop
@@ -476,13 +525,13 @@ tty_clear:
     ret
 
 ; Default command run when no other commands found
-str: db 10,"Command not found.",10,0
+str: db 10,"Command or program not found.",10,0
 none_default:
+    mov bl, 0xf
+    mov bh, 0
     mov eax, str
     call tty_printstr
     
-    mov al, 10
-    call tty_putchar
     mov eax, shell_prompt
     call tty_printstr
     ; Render changes
@@ -545,7 +594,8 @@ cur_hook:
     ret
 
 stdout_hookf:
-    ; EAX has the obejct required
+    ; EAX has the object required
+    ; Interpret bl as the foreground color and bh as the background color
     call tty_printstr
     ; Render changes
     mov eax, 0x10
@@ -580,7 +630,7 @@ kbd_enabled: db 1 ; is the keyboard registered?
 gui_enabled: db 1 ; blinking cursor
 program_running: dd fakeflags ; ptr to whether the program is alive (for reclaiming the keyboard) (for now keep it like that)
 
-intro: db "Vara OS devshell loaded. Type 'help' for information.",10,0
+intro: db "Vara OS devshell loaded. Type 'help' for information.",10,"To find more command extensions, check /bin/",10,0
 
 fakeflags: db 1
 

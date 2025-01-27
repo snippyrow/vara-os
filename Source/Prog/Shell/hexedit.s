@@ -38,6 +38,8 @@ hexedit:
     mov byte [eax + 8], byte ':'
     mov byte [eax + 9], byte ' '
     mov byte [eax + 10], 0
+    mov bl, 0xf
+    mov bh, 0
     call tty_printstr
 
     ; CL is byte counter
@@ -53,6 +55,8 @@ hexedit:
     ; Append a space
     mov byte [eax + 2], byte ' '
     mov byte [eax + 3], 0
+    mov bl, 0xf
+    mov bh, 0
     call tty_printstr
     pop ecx
     inc cl
@@ -63,6 +67,8 @@ hexedit:
 .endln:
     ; Print the wall
     mov eax, wall
+    mov bl, 0xf
+    mov bh, 0
     call tty_printstr
     ; Print the decoded map
     mov eax, decoded

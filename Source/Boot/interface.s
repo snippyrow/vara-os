@@ -22,6 +22,11 @@
 
 
 ; Linked kernel starts here.
+; 0x100 (640x400)
+; 0x101 (640x480)
+; 0x103 (800x600)
+; 0x105 (1024x768)
+; 0x107 (1280x1024)
 
 VBE_RES equ 0x107 ; 1280×1024
 SCREEN_WIDTH equ 1280
