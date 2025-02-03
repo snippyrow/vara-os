@@ -366,7 +366,7 @@ Mouse_Init:
     call Mouse_Read
     
     ; Set highest sample rate
-    mov al, 0
+    mov al, 3
     out 0xE8, al
     call Mouse_Wait_Read
     call Mouse_Read

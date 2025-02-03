@@ -21,7 +21,15 @@ asm:
 	nasm -felf32 "Source/Prog/Usage/memusage.s" -f bin -o "Binaries/memusage.bin"
 	nasm -felf32 "Source/Prog/Textedit/editor.s" -f bin -o "Binaries/texteditor_v1.bin"
 	nasm -felf32 "Source/Prog/Sysfetch/fetch.s" -f bin -o "Binaries/sysfetch.bin"
-# nasm "Source/Asm/proc.s" -f elf -o "Binaries/proc.o"
+
+
+#nasm -felf32 "Source/Prog/Boot/mgr.s" -f bin -o "Binaries/switchmgr.bin"
+	nasm "Source/Prog/Boot/mgr.s" -f elf -o "Binaries/switchmgr.o"
+# compile window manager in C++
+	/usr/local/i386elfgcc/bin/i386-elf-gcc $(CFLAGS) -c Source/Prog/Boot/Windows/init.cpp -o Binaries/win.o
+# link
+	/usr/local/i386elfgcc/bin/i386-elf-ld -o "Binaries/winmgr.bin" -Ttext 0x800000 "Binaries/switchmgr.o" "Binaries/win.o" --oformat binary
+
 # /usr/local/i386elfgcc/bin/i386-elf-gcc $(CFLAGS) -c Source/Utilities/Util.cpp -o Binaries/util.o
 
 link:
@@ -38,6 +46,7 @@ run:
 	dd if=Binaries/memusage.bin of=main.img bs=512 seek=91
 	dd if=Binaries/texteditor_v1.bin of=main.img bs=512 seek=93
 	dd if=Binaries/sysfetch.bin of=main.img bs=512 seek=101
+	dd if=Binaries/winmgr.bin of=main.img bs=512 seek=103
 	dd if=/dev/zero bs=1M count=30 >> main.img
 # append 7100000 zeroes to convert to vdi
 

@@ -20,6 +20,10 @@ directorysetup:
     mov edi, sysfetch
     int 0x80
 
+    mov eax, 0x40
+    mov edi, windowboot
+    int 0x80
+
     ; Append code to virus file
     ; Malloc enough space (give about 1KB)
     ; Shared between ALL files
@@ -78,6 +82,18 @@ directorysetup:
     mov esi, edi
     int 0x80
 
+    ; Write window switcher
+    mov eax, 0x18
+    mov ebx, 103
+    mov cl, 8
+    int 0x80
+
+    mov eax, 0x42
+    mov ebx, dword [windowboot + 16] ; cluster start
+    mov ecx, 3000 ; 1000 bytes seems okay
+    mov esi, edi
+    int 0x80
+
 
     ; Free memory
     mov eax, 0x1B
@@ -123,6 +139,15 @@ sysfetch:
     dd 0
     dd 0
     dd 1000
+
+windowboot:
+    db "window",0,0,0,0,0,0
+    db "run"
+    db 1
+    dd 0 ; cluster, reserved
+    dd 0
+    dd 0
+    dd 2000
     
 
 home: resd 1

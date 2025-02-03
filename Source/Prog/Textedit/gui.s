@@ -14,22 +14,7 @@ gui_init:
     mov bx, word [eax + 20]
     mov word [win_height], bx
 
-    ; Format shell dimensions for resolution
-    ; WIDTH
-    mov ax, word [win_width]
-    mov bx, word [text_margin]
-    shl bx, byte 1 ; x2
-    sub ax, bx
-    shr ax, byte 3 ; /8 (floored)
-    mov word [text_width], ax
 
-    ; HEIGHT
-    mov ax, word [win_height]
-    mov bx, word [text_margin]
-    shl bx, byte 1 ; x2
-    sub ax, bx
-    shr ax, byte 4 ; /16 (floored)
-    mov word [text_height], ax
 
 screen_clear:
     ; Clear the screen (draw a rect with background color)

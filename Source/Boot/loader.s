@@ -175,6 +175,7 @@ fat_test_struct:
 ;   EAX 0x35 = Hook STDOUT (ebx = ptr to function).. hooks a function, so that whenever standard output is sent it repeats for everything here
 ;   EAX 0x36 = Unhook STDOUT (ebx = ptr to function).. unhooks the desired function to STDOUT
 ;   EAX 0x37 = Get hook info (eax = ptr to KBD hooks, ebx = ptr to PIT hooks, ecx = ptr to STDOUT hooks, edx = ptr to malloc memory table)
+;   EAX 0x39 = Get kernel info (eax = KB of memory, ebx = ptr to kernel name)
 
 ;   EAX 0x40 = Make FAT object (ebx = directory start cluster, edi = fat object ptr, (optional) esi = ptr parent directory name) (esi is for the navigator to work on directories)
 ;       The function takes care of different types of entries, such as parents, etc. Struct will be modified to reflect properties
