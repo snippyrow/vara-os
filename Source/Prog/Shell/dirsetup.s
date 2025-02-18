@@ -21,6 +21,10 @@ directorysetup:
     int 0x80
 
     mov eax, 0x40
+    mov edi, colorama
+    int 0x80
+
+    mov eax, 0x40
     mov edi, windowboot
     int 0x80
 
@@ -28,7 +32,7 @@ directorysetup:
     ; Malloc enough space (give about 1KB)
     ; Shared between ALL files
     mov eax, 0x1A
-    mov ebx, 4096
+    mov ebx, 0x4000
     int 0x80
     ; Assume we have enough at runtime
 
@@ -82,15 +86,27 @@ directorysetup:
     mov esi, edi
     int 0x80
 
-    ; Write window switcher
+    ; copy colorama program
     mov eax, 0x18
     mov ebx, 103
-    mov cl, 8
+    mov cl, 4
+    int 0x80
+
+    mov eax, 0x42
+    mov ebx, dword [colorama + 16] ; cluster start
+    mov ecx, 3000 ; 1000 bytes seems okay
+    mov esi, edi
+    int 0x80
+
+    ; Write window switcher
+    mov eax, 0x18
+    mov ebx, 110
+    mov cl, 30
     int 0x80
 
     mov eax, 0x42
     mov ebx, dword [windowboot + 16] ; cluster start
-    mov ecx, 3000 ; 1000 bytes seems okay
+    mov ecx, 0x4000 ; 1000 bytes seems okay
     mov esi, edi
     int 0x80
 
@@ -98,7 +114,7 @@ directorysetup:
     ; Free memory
     mov eax, 0x1B
     mov ebx, edi
-    mov ecx, 4096
+    mov ecx, 0x4000
     int 0x80
     ret
 
@@ -140,6 +156,15 @@ sysfetch:
     dd 0
     dd 1000
 
+colorama:
+    db "colorama",0,0,0,0
+    db "run"
+    db 1
+    dd 0 ; cluster, reserved
+    dd 0
+    dd 0
+    dd 3000
+
 windowboot:
     db "window",0,0,0,0,0,0
     db "run"
@@ -147,7 +172,7 @@ windowboot:
     dd 0 ; cluster, reserved
     dd 0
     dd 0
-    dd 2000
+    dd 0x4000
     
 
 home: resd 1

@@ -40,5 +40,5 @@ boot_main:
     jmp .y_loop
 ; error: not printing all of the string
 tesstr:
-    db 10,"Welcome to my operating system, vara 1.0!",10,"To get started, try running from programs in the /home directory.",10,"The system is in its infancy, though there is much to discover (myself included).",10,0
+    db 10,"Welcome to my operating system, vara 1.0!",10,"To get started, try running from programs in the /bin directory.",10,"The system is in its infancy, though there is much to discover (myself included).",10,0
 

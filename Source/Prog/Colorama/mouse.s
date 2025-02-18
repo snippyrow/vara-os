@@ -4,7 +4,6 @@
 [global mouse_left_handler]
 [global mouse_middle_handler]
 [global mouse_right_handler]
-[extern mouse_left]
 
 ; When called, EAX contains the mouse datapacket.
 ; 0-7:   X movement
@@ -80,12 +79,10 @@ mouse_handler:
     mov dx, word [mouse_abs_x]
     shl edx, 16
     mov dx, word [mouse_abs_y]
-    pusha
-    call mouse_move
-    popa
     call mouse_mask_update
     call mouse_render
 .end:
+    call mouse_move
     ret
     
 .x_large:
@@ -110,9 +107,7 @@ mouse_handler:
     mov eax, dword [mouse_left_handler]
     test eax, eax
     jz .update
-    pusha
     call eax
-    popa
     jmp .update
 .middleclick:
     mov byte [mouse_filled], 1
@@ -257,24 +252,6 @@ mouse_mask_draw:
 .end:
     popa
     ret
-    
-; EDI = string, EDX = [y, x], CL = text color
-win_draw_str:
-    pusha
-    mov ebx, edx
-    mov ch, cl
-    mov eax, 0x13 ; opcode
-.loop:
-    mov cl, byte [edi]
-    test cl, cl
-    jz .end
-    int 0x80
-    add ebx, 8
-    inc edi
-    jmp .loop
-.end:
-    popa
-    ret
 
 ; Mouse sprite will invert whatever is below in the work buffer
 ; 12 x 19 sprite
@@ -329,6 +306,6 @@ mouse_properties:
     mouse_filled: db 0
 
 mouse_hooks:
-    mouse_left_handler: dd mouse_left
+    mouse_left_handler: resd 1
     mouse_middle_handler: resd 1
     mouse_right_handler: resd 1

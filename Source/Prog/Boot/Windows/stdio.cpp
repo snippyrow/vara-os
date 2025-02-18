@@ -5,6 +5,9 @@
 // For searching the RAW directory structure, share a large malloc at the fget function
 #include "stdint.h"
 
+// Search for a file with a string, find the file ptr (cluster start), then read
+
+// _fread_raw(cluster, ptr destination, max clusters to read);
 
 // Probably re-do later
 uint32_t fget(const char *fname) {

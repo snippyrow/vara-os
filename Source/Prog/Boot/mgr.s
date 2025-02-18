@@ -3,6 +3,7 @@
 
 [bits 32]
 [extern win_init]
+[extern mouse_move]
 [global win_redraw]
 [global win_width]
 [global win_height]
@@ -28,7 +29,7 @@ boot_main:
     call gui_init
 
     ; Clear the entire screen blue
-    mov dl, 0x96 ; bg
+    mov dl, 0xAF ; bg
     mov eax, 0x12
     xor ebx, ebx
     mov cx, word [win_height]
