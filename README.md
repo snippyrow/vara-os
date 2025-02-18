@@ -1,4 +1,4 @@
-# Vara OS!
+# Celsix OS!
 
 Custom OS. Features:
 - One single permission (kernel mode) and some drivers
