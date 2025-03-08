@@ -151,7 +151,7 @@ ata_lba_write:
 ; Return EAX contains the pointer to the start (0 if failed)
 
 block_size equ 128              ; Example block size (adjust as needed)
-num_blocks equ 65535            ; Total number of blocks (adjust as needed)
+num_blocks equ 75535            ; Total number of blocks (adjust as needed)
 ;mem_table:
     ;db 0b11111100
     ;resb num_blocks

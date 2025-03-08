@@ -34,6 +34,8 @@
 [extern Mouse_Int_Handle]
 [extern Mouse_Hooks]
 [extern Mouse_Init]
+[extern V_DrawRectRaw]
+[extern V_DrawPixel]
 
 Kernel_Start:
     ; IDT Has been defined, populate it with components
@@ -71,8 +73,8 @@ Kernel_Start:
     
     call IDT_Remap
 
-    ; Change PIT frequency to 30hz
-    mov eax, 30
+    ; Change PIT frequency to 60hz
+    mov eax, 60
     call PIT_Config
     call Mouse_Init
 
@@ -156,8 +158,10 @@ fat_test_struct:
 
 ; LIST:
 ;   EAX 0x10 = Update screen from work buffer
+;   EAX 0x11 = Draw rectangle on raw framebuffer (ebx = [y0, x0], ecx = [y1, x1], dl = color).
 ;   EAX 0x12 = Draw rectangle (ebx = [y0, x0], ecx = [y1, x1], dl = color)
 ;   EAX 0x13 = Draw default 8x16 character (ebx = [y,x], cl = char, ch = color)
+;   EAX 0x14 = Draw single pixel (ebx = [y0, x0], cl = color)
 ;   EAX 0x16 = Get display information (return eax = VESA information vector, return ebx = work buffer start vector, return vector ecx = default font buffer)
 ;   EAX 0x18 = ATA LBA read to vector (ebx = LBA start address, cl = # of sectors to read, edi = buffer start address)
 ;   EAX 0x19 = ATA write from ptr to LBA (ebx = LBA start address, cl = # of sectors to write, edi = buffer start address)
@@ -188,10 +192,14 @@ Sys_Int_Handle:
     cli
     cmp eax, dword 0x10
     je .v_render
+    cmp eax, dword 0x11
+    je .v_raw_render_rect
     cmp eax, dword 0x12
     je .v_render_rect
     cmp eax, dword 0x13
     je .v_render_dchar
+    cmp eax, dword 0x14
+    je .v_putpixel
     cmp eax, dword 0x16
     je .v_ret_info
     cmp eax, dword 0x18
@@ -244,6 +252,15 @@ Sys_Int_Handle:
     popa
     sti
     iret
+.v_raw_render_rect:
+    pusha
+    mov eax, ebx
+    mov ebx, ecx
+    mov cl, dl
+    call V_DrawRectRaw
+    popa
+    sti
+    iret
 .v_render_rect:
     pusha
     mov eax, ebx
@@ -259,6 +276,13 @@ Sys_Int_Handle:
     mov bl, cl
     mov bh, ch
     call V_DrawChar
+    popa
+    sti
+    iret
+.v_putpixel:
+    pusha
+    mov eax, ebx
+    call V_DrawPixel
     popa
     sti
     iret

@@ -55,3 +55,11 @@ uint32_t strsplit(const char *a, char splitter) {
         n++;
     }
 }
+
+uint32_t strlen(const char *str) {
+    uint32_t i = 0;
+    while (str[i] != '\0') {
+        i++;
+    }
+    return i;
+}

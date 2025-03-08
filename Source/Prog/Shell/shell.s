@@ -552,9 +552,9 @@ none_default:
 cur_hook:
     mov al, byte [cursor_state]
     inc al
-    cmp al, byte 18
-    je .tick
     cmp al, byte 36
+    je .tick
+    cmp al, byte 72
     je .untick
     mov byte [cursor_state], al
     ret

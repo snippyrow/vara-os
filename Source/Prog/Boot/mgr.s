@@ -11,6 +11,9 @@
 [global malloc]
 [global free]
 
+[global mouse_abs_x]
+[global mouse_abs_y]
+
 headers:
     origin_addr: dd 0x800000
     start_addr: dd boot_main

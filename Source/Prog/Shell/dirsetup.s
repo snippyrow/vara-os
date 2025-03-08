@@ -32,7 +32,7 @@ directorysetup:
     ; Malloc enough space (give about 1KB)
     ; Shared between ALL files
     mov eax, 0x1A
-    mov ebx, 0x4000
+    mov ebx, 0x6000
     int 0x80
     ; Assume we have enough at runtime
 
@@ -101,12 +101,12 @@ directorysetup:
     ; Write window switcher
     mov eax, 0x18
     mov ebx, 110
-    mov cl, 30
+    mov cl, 27
     int 0x80
 
     mov eax, 0x42
     mov ebx, dword [windowboot + 16] ; cluster start
-    mov ecx, 0x4000 ; 1000 bytes seems okay
+    mov ecx, 0x6000 ; 1000 bytes seems okay
     mov esi, edi
     int 0x80
 
@@ -114,7 +114,7 @@ directorysetup:
     ; Free memory
     mov eax, 0x1B
     mov ebx, edi
-    mov ecx, 0x4000
+    mov ecx, 0x6000
     int 0x80
     ret
 
@@ -172,7 +172,7 @@ windowboot:
     dd 0 ; cluster, reserved
     dd 0
     dd 0
-    dd 0x4000
+    dd 0x6000
     
 
 home: resd 1

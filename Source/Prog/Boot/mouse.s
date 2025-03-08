@@ -1,10 +1,11 @@
 [bits 32]
 [global mouse_abs_x]
 [global mouse_abs_y]
-[global mouse_left_handler]
+[global mouse_left_down_handler]
 [global mouse_middle_handler]
 [global mouse_right_handler]
-[extern mouse_left]
+[extern mouse_left_down]
+[extern mouse_left_up]
 
 ; When called, EAX contains the mouse datapacket.
 ; 0-7:   X movement
@@ -28,6 +29,14 @@ mouse_handler:
     jnz .rightclick
     test dl, 4
     jnz .middleclick
+
+    ; If no buttons are pushed, test if we previously pressed a button and update therefore.
+    ; Assuming all buttons are depressed at this point
+    ;cmp byte [left], 1
+    ;je .unleft
+
+
+
 
 .update:
     test cl, cl
@@ -106,8 +115,9 @@ mouse_handler:
     jmp .finish
 .leftclick:
     mov byte [mouse_filled], 1
+    mov byte [left], 1
     inc cl
-    mov eax, dword [mouse_left_handler]
+    mov eax, dword [mouse_left_down_handler]
     test eax, eax
     jz .update
     pusha
@@ -132,6 +142,12 @@ mouse_handler:
     jmp .update
 .unclicked:
     mov byte [mouse_filled], 0
+    cmp byte [left], 1
+    jne .render_update
+    pusha
+    mov eax, dword [mouse_left_up_handler]
+    call eax
+    popa
     jmp .render_update
 
 
@@ -327,8 +343,11 @@ mouse_properties:
     mouse_abs_x: dw 0
     mouse_abs_y: dw 0
     mouse_filled: db 0
+    ; Button status
+    left: db 0
 
 mouse_hooks:
-    mouse_left_handler: dd mouse_left
+    mouse_left_down_handler: dd mouse_left_down
+    mouse_left_up_handler: dd mouse_left_up
     mouse_middle_handler: resd 1
     mouse_right_handler: resd 1

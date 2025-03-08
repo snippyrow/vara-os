@@ -19,6 +19,8 @@
 [global V_FNT_BUFF]
 [global V_DrawChar]
 [global VBE_Info]
+[global V_DrawRectRaw]
+[global V_DrawPixel]
 
 
 ; Linked kernel starts here.
@@ -157,6 +159,49 @@ V_DrawRect:
     popa                     ; Restore all registers
     ret                      ; Return to caller
 
+; Draw a rectangle in the raw frame buffer.
+; Higher eax is x0, lower eax is y0, higher ebx is x1, lower ebx is y1
+; cl is the pixel color
+V_DrawRectRaw:
+    pusha ; Save all general-purpose registers
+    ; Extract inputs from registers
+    movzx esi, ax ; Extract x0 (low word of EAX) into ESI
+    shr eax, 16 ; Shift x0 out, leaving y0 in EAX
+    movzx ebp, ax ; Extract y0 into EBP
+
+    movzx edi, bx ; Extract x1 (low word of EBX) into EDI
+    shr ebx, 16 ; Shift x1 out, leaving y1 in EBX
+    movzx edx, bx ; Extract y1 into EDX
+
+    mov bl, cl
+
+.loop_y: ; Outer loop for rows (y)
+    cmp ebp, edx ; Check if y0 > y1
+    jg .end ; End if all rows are processed
+
+    mov ecx, esi ; Load x0 into ECX for inner loop
+
+.loop_x: ; Inner loop for columns (x)
+    cmp ecx, edi ; Check if x0 > x1
+    jg .next_row ; Go to the next row if done with the current row
+
+    ; Calculate pixel position in work buffer
+    mov eax, ebp ; Get current y position
+    imul eax, SCREEN_WIDTH ; Multiply y by screen width
+    add eax, ecx ; Add x position
+    add eax, dword [V_FRAME_ADDR] ; Add frame buffer address
+    mov byte [eax], bl ; Write pixel color
+
+    inc ecx ; Increment x (column)
+    jmp .loop_x ; Continue inner loop
+
+.next_row:
+    inc ebp ; Increment row (y)
+    jmp .loop_y ; Continue outer loop
+.end:
+    popa ; Restore all registers
+    ret ; Return to caller
+
 ; High EAX is X coordinate, Low EAX is Y coordinate
 ; bl is the character code, bh is the font color
 
@@ -212,6 +257,16 @@ V_DrawChar:
 .end:
     popa
     ret
+
+V_DrawPixel:
+    movzx esi, ax ; move X coordinate
+    shr eax, 16 ; shift Y into the first part and multiply by the width of each line
+    movzx ebx, word [V_WIDTH]
+    mul ebx
+    add eax, esi ; add in the X coordinate
+    mov byte [V_WORK_BUFF + eax], cl
+    ret
+
 
 ; Low EAX is X coordinate, High EAX is Y coordinate
 ; ESI is the string pointer
